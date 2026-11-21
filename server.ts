@@ -23,18 +23,6 @@ const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   // Vite dev server integration
-  if (process.env.NODE_ENV === "production") {
-    const path = await import("node:path");
-    app.use(express.static(path.resolve("dist")));
-    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.resolve("dist/index.html")));
-  } else {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  }
-
   // Connected WebSocket clients for real-time mobile alerts
   const clients = new Set<WebSocket>();
 
@@ -169,6 +157,18 @@ Analise minuciosamente a imagem fornecida do gráfico:
       });
     }
   });
+
+  if (process.env.NODE_ENV === "production") {
+    const path = await import("node:path");
+    app.use(express.static(path.resolve("dist")));
+    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.resolve("dist/index.html")));
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Tozzi Sinais IA running on http://0.0.0.0:${PORT}`);
