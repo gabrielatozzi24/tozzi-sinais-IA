@@ -110,6 +110,26 @@ export default function App() {
   const sessionRef = useRef(0);
   const activeRequestRef = useRef<AbortController | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED"; reason: string };
+  const candidateRef = useRef<Candidate | null>(null);
+  const [candidate, setCandidate] = useState<Candidate | null>(null);
+  const [nowEpoch, setNowEpoch] = useState(Date.now());
+  const confirmBusyRef = useRef(false);
+  const audioRef = useRef<AudioContext | null>(null);
+  const setCandidateSafe = (next: Candidate | null) => { candidateRef.current = next; setCandidate(next); };
+  useEffect(() => {
+    const ticker = setInterval(() => {
+      const now = Date.now();
+      setNowEpoch(now);
+      const pending = candidateRef.current;
+      if (pending && pending.status !== "CANCELLED" && now > pending.targetEpoch + 3000) {
+        setCandidateSafe({ ...pending, status: "CANCELLED", reason: "Horário da entrada passou. Pré-alerta encerrado; aguarde nova análise." });
+      }
+    }, 1000);
+    return () => clearInterval(ticker);
+  }, []);
+  const formatEntryTime = (timestamp: number) => new Date(timestamp).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
 
   // Diagnostics Test Suite
   const [tests, setTests] = useState<TestItem[]>([
@@ -142,29 +162,36 @@ export default function App() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "NEW_SIGNAL" && !mediaStreamRef.current) {
-          const decision = data.guardResult?.finalDecision;
-          if (data.guardResult?.passed !== true || (decision !== "POSSÍVEL COMPRA" && decision !== "POSSÍVEL VENDA")) return;
-          const delay = Number(data.latencyMs);
-          if (!Number.isFinite(delay) || delay > 15000) return;
-          const record: SignalRecord = {
-            id: crypto.randomUUID(),
-            timestamp: new Date(data.timestamp).toLocaleTimeString("pt-BR"),
-            asset: data.asset,
-            timeframe: data.timeframe,
-            expiration: data.expiration,
-            decision,
-            reason: data.guardResult?.guardReason || "Análise visual verificada",
-            guardPassed: true,
-            guardReason: data.guardResult?.guardReason || "",
-            latencyMs: delay,
-            result: "PENDENTE"
-          };
-          setSignalsHistory(prev => [record, ...prev.slice(0, 49)]);
-          setCurrentVisionResult(data.visionResult);
-          setCurrentGuardResult(data.guardResult);
-          setLastAnalysisTime(record.timestamp);
-          if (soundEnabled) playAlertSound(decision);
+        if (!mediaStreamRef.current && ["PRE_ALERT", "CONFIRMED", "CANCELLED"].includes(data.type)) {
+          const direction = data.guardResult?.finalDecision;
+          const targetEpoch = Number(data.targetEpoch);
+          if (!Number.isFinite(targetEpoch)) return;
+          if (data.type !== "CANCELLED" && (data.guardResult?.passed !== true ||
+            (direction !== "POSSÍVEL COMPRA" && direction !== "POSSÍVEL VENDA"))) return;
+          const active = candidateRef.current;
+          if (data.type === "PRE_ALERT") {
+            if (targetEpoch < Date.now() + 45000) return;
+            const next: Candidate = { targetEpoch, decision: direction, asset: data.asset,
+              timeframe: data.timeframe, expiration: data.expiration,
+              status: "PRE_ALERT", reason: "Pré-alerta. NÃO ENTRAR: aguarde confirmação perto do horário." };
+            setCandidateSafe(next);
+            if (soundEnabled) playAlertSound(direction);
+          } else if (active && active.targetEpoch === targetEpoch) {
+            const next: Candidate = { ...active, status: data.type,
+              reason: data.type === "CANCELLED"
+                ? data.guardResult?.guardReason || "Confirmação reprovada: não entrar."
+                : "Condições ainda alinhadas. Aguarde o horário previsto; sem garantia de acerto." };
+            setCandidateSafe(next);
+            if (soundEnabled) playAlertSound(data.type === "CANCELLED" ? "AGUARDAR" : direction);
+            if (data.type === "CONFIRMED") {
+              setSignalsHistory(prev => [{
+                id: crypto.randomUUID(), timestamp: new Date().toLocaleTimeString("pt-BR"), asset: next.asset,
+                timeframe: next.timeframe, expiration: next.expiration, decision: next.decision,
+                reason: next.reason + " Entrada prevista: " + formatEntryTime(targetEpoch),
+                guardPassed: true, guardReason: next.reason, latencyMs: Number(data.latencyMs) || 0, result: "PENDENTE"
+              }, ...prev.slice(0, 49)]);
+            }
+          }
         }
       } catch (e) {
         console.error("WS message parse error:", e);
@@ -179,16 +206,18 @@ export default function App() {
   // Audio beep
   const playAlertSound = (decision: string) => {
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioCtx = audioRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioRef.current = audioCtx;
+      void audioCtx.resume();
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = decision === "POSSÍVEL COMPRA" ? "sine" : decision === "POSSÍVEL VENDA" ? "sawtooth" : "triangle";
       osc.frequency.setValueAtTime(decision === "POSSÍVEL COMPRA" ? 880 : decision === "POSSÍVEL VENDA" ? 440 : 550, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.22, audioCtx.currentTime);
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.start();
-      osc.stop(audioCtx.currentTime + 0.3);
+      osc.stop(audioCtx.currentTime + 0.6);
     } catch (e) {
       console.error("Audio error:", e);
     }
@@ -200,6 +229,7 @@ export default function App() {
       sessionRef.current++;
       pauseRef.current = false;
       prevFrameDataRef.current = null;
+      setCandidateSafe(null);
       setAnalysisError(null);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "window" },
@@ -247,6 +277,7 @@ export default function App() {
   // Stop Monitoring
   const stopMonitoring = () => {
     sessionRef.current++;
+    setCandidateSafe(null);
     activeRequestRef.current?.abort();
     analysisBusyRef.current = false;
     setIsAnalyzing(false);
@@ -267,6 +298,7 @@ export default function App() {
 
   const togglePause = () => {
     pauseRef.current = !isPaused;
+    if (!isPaused) setCandidateSafe(null);
     if (!isPaused) {
       sessionRef.current++;
       activeRequestRef.current?.abort();
@@ -276,7 +308,7 @@ export default function App() {
     setIsPaused(!isPaused);
   };
 
-  // Single-flight processing: capture only a fresh frame after the previous request completes.
+  // Do not run overlapping calls; reserve a fresh frame for a recheck near entry time.
   const startMonitoringLoop = () => {
     if (monitoringLoopRef.current) clearInterval(monitoringLoopRef.current);
     monitoringLoopRef.current = setInterval(() => {
@@ -285,14 +317,29 @@ export default function App() {
       const track = mediaStreamRef.current?.getVideoTracks()[0];
       if (pauseRef.current || analysisBusyRef.current || !video || !canvas || !track || track.readyState !== "live" || video.videoWidth < 1) return;
       const now = Date.now();
-      if (now - lastAnalysisTimestampRef.current < minSecondsBetweenAnalysis * 1000) return;
+      const pending = candidateRef.current;
+      let phase: "PREPARE" | "CONFIRM" = "PREPARE";
+      let targetEpoch: number;
+      let priorDirection = "";
+      if (pending && pending.status === "PRE_ALERT") {
+        const remain = pending.targetEpoch - now;
+        if (remain > 30000 || remain < 20000 || confirmBusyRef.current) return;
+        phase = "CONFIRM";
+        targetEpoch = pending.targetEpoch;
+        priorDirection = pending.decision;
+        confirmBusyRef.current = true;
+      } else {
+        if (pending && now < pending.targetEpoch + 3500) return;
+        if (now - lastAnalysisTimestampRef.current < minSecondsBetweenAnalysis * 1000) return;
+        const bucketMs = selectedTimeframe === "M5" ? 300000 : 60000;
+        targetEpoch = Math.ceil((now + 75000) / bucketMs) * bucketMs;
+      }
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      if (!ctx) return;
+      if (!ctx) { confirmBusyRef.current = false; return; }
       canvas.width = 1024;
       canvas.height = Math.max(1, Math.round(1024 * video.videoHeight / video.videoWidth));
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       setLastCaptureTime(new Date(now).toLocaleTimeString("pt-BR"));
-      // Sample actual image pixels, not the fixed prefix of base64 data.
       const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let hash = 2166136261;
       const stride = Math.max(4, Math.floor(pixels.length / 256 / 4) * 4);
@@ -301,13 +348,16 @@ export default function App() {
       const changed = prevFrameDataRef.current !== fingerprint;
       prevFrameDataRef.current = fingerprint;
       setChangeDetected(changed);
-      if (!changed) return;
+      if (!changed && phase === "PREPARE") return;
       lastAnalysisTimestampRef.current = now;
-      void processFrameAnalysis(canvas.toDataURL("image/jpeg", 0.7), now, sessionRef.current);
-    }, 2000);
+      void processFrameAnalysis(canvas.toDataURL("image/jpeg", 0.7), now, sessionRef.current, phase, targetEpoch, priorDirection);
+    }, 1000);
   };
 
-  const processFrameAnalysis = async (dataUrl: string, captureTimestamp: number, sessionId: number) => {
+  const processFrameAnalysis = async (
+    dataUrl: string, captureTimestamp: number, sessionId: number,
+    phase: "PREPARE" | "CONFIRM", targetEpoch: number, priorDirection: string
+  ) => {
     if (analysisBusyRef.current) return;
     analysisBusyRef.current = true;
     setIsAnalyzing(true);
@@ -319,7 +369,10 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Tozzi-Access": accessCode },
         signal: controller.signal,
-        body: JSON.stringify({ imageBase64: dataUrl, selectedAsset: customAsset || selectedAsset, selectedTimeframe, selectedExpiration })
+        body: JSON.stringify({
+          imageBase64: dataUrl, selectedAsset: customAsset || selectedAsset,
+          selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection
+        })
       });
       if (sessionId !== sessionRef.current || pauseRef.current || !mediaStreamRef.current) return;
       const latencyMs = Date.now() - captureTimestamp;
@@ -333,32 +386,58 @@ export default function App() {
       if (!data?.visionResult || !data?.guardResult) throw new Error("Resposta incompleta da IA.");
       setLastAnalysisTime(new Date().toLocaleTimeString("pt-BR"));
       const guard = data.guardResult;
-      const ch = guard.checks || {};
       const expired = latencyMs > maxLatencyLimit;
-      const passed = !expired && guard.passed === true && ch.blurry === false && ch.incomplete === false &&
-        ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true;
-      const requested = guard.finalDecision;
-      const decision: SignalRecord["decision"] = passed && (requested === "POSSÍVEL COMPRA" || requested === "POSSÍVEL VENDA") ? requested : "AGUARDAR";
-      const reason = expired ? "SINAL EXPIRADO: " + (latencyMs / 1000).toFixed(1) + " segundos de atraso."
-        : decision === "AGUARDAR" ? "BLOQUEIO: " + (guard.guardReason || data.visionResult.reason || "Sem confirmação.")
-        : (guard.guardReason || data.visionResult.reason || "Análise visual");
+      const direction = guard.finalDecision;
+      const approved = !expired && guard.passed === true && (direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA");
+      const remain = targetEpoch - Date.now();
+      const windowOk = phase === "PREPARE" ? remain >= 60000 : remain >= 4000 && remain <= 30000;
+      const allowed = approved && windowOk && (phase === "PREPARE" || priorDirection === direction);
+      const reason = expired ? "SINAL EXPIRADO: " + (latencyMs / 1000).toFixed(1) + " s."
+        : !windowOk ? "Horário de entrada perdeu validade."
+        : guard.guardReason || data.visionResult.reason || "Condição indefinida.";
       setCurrentVisionResult(data.visionResult);
-      setCurrentGuardResult({ ...guard, passed: decision !== "AGUARDAR", guardReason: reason });
+      setCurrentGuardResult({ ...guard, passed: allowed, finalDecision: allowed ? direction : "AGUARDAR", guardReason: reason });
       setAnalysisError(null);
-      const record: SignalRecord = { id: crypto.randomUUID(), timestamp: new Date().toLocaleTimeString("pt-BR"),
-        asset: customAsset || selectedAsset, timeframe: selectedTimeframe, expiration: selectedExpiration,
-        decision, reason, guardPassed: decision !== "AGUARDAR", guardReason: reason, latencyMs, result: "PENDENTE" };
-      setSignalsHistory(prev => [record, ...prev.slice(0, 49)]);
-      if (soundEnabled && decision !== "AGUARDAR") playAlertSound(decision);
+      if (phase === "PREPARE") {
+        if (allowed) {
+          const next: Candidate = { targetEpoch, decision: direction, asset: customAsset || selectedAsset,
+            timeframe: selectedTimeframe, expiration: selectedExpiration, status: "PRE_ALERT",
+            reason: "Possível " + (direction === "POSSÍVEL COMPRA" ? "COMPRA" : "VENDA") +
+              " às " + formatEntryTime(targetEpoch) + ". NÃO ENTRE ainda; aguardando reconfirmação." };
+          setCandidateSafe(next);
+          if (soundEnabled) playAlertSound(direction);
+        }
+      } else {
+        const previous = candidateRef.current;
+        if (previous && previous.targetEpoch === targetEpoch) {
+          const next: Candidate = { ...previous, status: allowed ? "CONFIRMED" : "CANCELLED",
+            reason: allowed ? "Condições reconfirmadas. Entrada prevista: " + formatEntryTime(targetEpoch) +
+              ". Confira novamente o gráfico antes de qualquer operação." : "SINAL CANCELADO: " + reason };
+          setCandidateSafe(next);
+          if (soundEnabled) playAlertSound(allowed ? direction : "AGUARDAR");
+          if (allowed) {
+            const record: SignalRecord = { id: crypto.randomUUID(),
+              timestamp: new Date().toLocaleTimeString("pt-BR"), asset: next.asset,
+              timeframe: next.timeframe, expiration: next.expiration, decision: next.decision,
+              reason: next.reason, guardPassed: true, guardReason: reason, latencyMs, result: "PENDENTE" };
+            setSignalsHistory(prev => [record, ...prev.slice(0, 49)]);
+          }
+        }
+      }
     } catch (err: any) {
       if (sessionId !== sessionRef.current) return;
-      const reason = err?.name === "AbortError" ? "Análise excedeu 17 segundos; sinal descartado." : err?.message || "Erro de análise";
+      const reason = err?.name === "AbortError" ? "Análise demorou mais de 17 segundos; descartada." : err?.message || "Erro de análise.";
       setAnalysisError(reason);
       setCurrentGuardResult({ passed: false, finalDecision: "AGUARDAR", guardReason: reason,
         checks: { blurry: false, incomplete: true, assetMatch: false, timeframeMatch: false, contradictory: false, contextOk: false } });
+      if (phase === "CONFIRM") {
+        const pending = candidateRef.current;
+        if (pending && pending.targetEpoch === targetEpoch) setCandidateSafe({ ...pending, status: "CANCELLED", reason: "Sinal cancelado: " + reason });
+      }
       console.error("Falha de análise:", err);
     } finally {
       clearTimeout(timer);
+      if (phase === "CONFIRM") confirmBusyRef.current = false;
       if (activeRequestRef.current === controller) activeRequestRef.current = null;
       if (sessionId === sessionRef.current) { analysisBusyRef.current = false; setIsAnalyzing(false); }
     }
