@@ -19,16 +19,21 @@ const ai = new GoogleGenAI({
   },
 });
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   // Vite dev server integration
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
-  });
-
-  app.use(vite.middlewares);
+  if (process.env.NODE_ENV === "production") {
+    const path = await import("node:path");
+    app.use(express.static(path.resolve("dist")));
+    app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(path.resolve("dist/index.html")));
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  }
 
   // Connected WebSocket clients for real-time mobile alerts
   const clients = new Set<WebSocket>();
