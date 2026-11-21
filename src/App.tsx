@@ -111,7 +111,7 @@ export default function App() {
   const sessionRef = useRef(0);
   const activeRequestRef = useRef<AbortController | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED"; reason: string };
+  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "UNVERIFIED"; reason: string };
   const candidateRef = useRef<Candidate | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [dismissedPopupKey, setDismissedPopupKey] = useState("");
@@ -132,7 +132,10 @@ export default function App() {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
     try {
       const prefix = signal.status === "PRE_ALERT" ? "🔔 Pré-alerta — NÃO ENTRAR" :
-        signal.status === "CONFIRMED" ? "✅ Reconfirmado — confira horário" : "⛔ Sinal cancelado";
+        signal.status === "CONFIRMED" ? "✅ Reconfirmado — confira horário" :
+        signal.status === "CANCELLED" ? "⛔ Cancelado por alteração do gráfico" :
+        signal.status === "UNVERIFIED" ? "⚠️ Não confirmado — NÃO ENTRAR" :
+        "🕒 Horário encerrado — aviso histórico";
       const notification = new Notification(`${prefix} • ${signal.asset}`, {
         body: `${signal.decision} • ${formatEntryTime(signal.targetEpoch)} • ${signal.reason}`,
         tag: `tozzi-${signal.targetEpoch}-${signal.status}`
@@ -156,8 +159,14 @@ export default function App() {
       const now = Date.now();
       setNowEpoch(now);
       const pending = candidateRef.current;
-      if (pending && pending.status !== "CANCELLED" && now > pending.targetEpoch + 3000) {
-        setCandidateSafe({ ...pending, status: "CANCELLED", reason: "Horário da entrada passou. Pré-alerta encerrado; aguarde nova análise." });
+      if (pending && (pending.status === "PRE_ALERT" || pending.status === "CONFIRMED") && now > pending.targetEpoch + 3000) {
+        setCandidateSafe({
+          ...pending,
+          status: pending.status === "CONFIRMED" ? "CLOSED" : "EXPIRED",
+          reason: pending.status === "CONFIRMED"
+            ? "Horário de entrada encerrado. O sinal foi confirmado antes da entrada, mas o resultado WIN/LOSS não foi verificado automaticamente."
+            : "Pré-alerta expirou sem confirmação. Não entre usando esse aviso."
+        });
       }
     }, 1000);
     return () => clearInterval(ticker);
@@ -211,9 +220,12 @@ export default function App() {
             setCandidateSafe(next);
             if (soundEnabled) playAlertSound(direction);
           } else if (active && active.targetEpoch === targetEpoch) {
-            const next: Candidate = { ...active, status: data.type,
+            const technicalFailure = data.type === "CANCELLED" &&
+              /atras|expir|relógio|servidor|latên|janela|erro|falha/i.test(data.guardResult?.guardReason || "");
+            const next: Candidate = { ...active,
+              status: data.type === "CANCELLED" ? (technicalFailure ? "UNVERIFIED" : "CANCELLED") : "CONFIRMED",
               reason: data.type === "CANCELLED"
-                ? data.guardResult?.guardReason || "Confirmação reprovada: não entrar."
+                ? (technicalFailure ? "Não foi possível confirmar a tempo: " : "Mudança nas condições: ") + (data.guardResult?.guardReason || "Não entrar.")
                 : "Condições ainda alinhadas. Aguarde o horário previsto; sem garantia de acerto." };
             setCandidateSafe(next);
             if (soundEnabled) playAlertSound(data.type === "CANCELLED" ? "AGUARDAR" : direction);
@@ -454,9 +466,12 @@ export default function App() {
       } else {
         const previous = candidateRef.current;
         if (previous && previous.targetEpoch === targetEpoch) {
-          const next: Candidate = { ...previous, status: allowed ? "CONFIRMED" : "CANCELLED",
+          const technicalFailure = !allowed && (expired || clockMismatch || !windowOk);
+          const next: Candidate = { ...previous, status: allowed ? "CONFIRMED" : technicalFailure ? "UNVERIFIED" : "CANCELLED",
             reason: allowed ? "Condições reconfirmadas. Entrada prevista: " + formatEntryTime(targetEpoch) +
-              ". Confira novamente o gráfico antes de qualquer operação." : "SINAL CANCELADO: " + reason };
+              ". Confira novamente o gráfico antes de qualquer operação."
+              : technicalFailure ? "SEM CONFIRMAÇÃO (técnico/horário): " + reason
+              : "SINAL CANCELADO POR CONFLITO: " + reason };
           setCandidateSafe(next);
           if (soundEnabled) playAlertSound(allowed ? direction : "AGUARDAR");
           if (allowed) {
@@ -476,7 +491,7 @@ export default function App() {
         checks: { blurry: false, incomplete: true, assetMatch: false, timeframeMatch: false, contradictory: false, contextOk: false } });
       if (phase === "CONFIRM") {
         const pending = candidateRef.current;
-        if (pending && pending.targetEpoch === targetEpoch) setCandidateSafe({ ...pending, status: "CANCELLED", reason: "Sinal cancelado: " + reason });
+        if (pending && pending.targetEpoch === targetEpoch) setCandidateSafe({ ...pending, status: "UNVERIFIED", reason: "SEM CONFIRMAÇÃO: " + reason + " Não entre com base nesse pré-alerta." });
       }
       console.error("Falha de análise:", err);
     } finally {
@@ -593,9 +608,12 @@ export default function App() {
         </div>
         {candidate ? (
           <div className="space-y-2">
-            <p className={`text-lg font-bold ${candidate.status === "CANCELLED" ? "text-red-400" : candidate.status === "CONFIRMED" ? "text-green-300" : "text-amber-300"}`}>
+            <p className={`text-lg font-bold ${candidate.status === "CANCELLED" ? "text-red-400" : candidate.status === "CONFIRMED" || candidate.status === "CLOSED" ? "text-green-300" : "text-amber-300"}`}>
               {candidate.status === "PRE_ALERT" ? "🔔 PRÉ-ALERTA — NÃO ENTRAR AINDA" :
-               candidate.status === "CONFIRMED" ? "✅ RECONFIRMADO — AGUARDE O HORÁRIO" : "⛔ SINAL CANCELADO"}
+               candidate.status === "CONFIRMED" ? "✅ RECONFIRMADO — AGUARDE O HORÁRIO" :
+               candidate.status === "CLOSED" ? "🕒 HORÁRIO ENCERRADO — CONFIRMAÇÃO REGISTRADA" :
+               candidate.status === "UNVERIFIED" ? "⚠️ SEM CONFIRMAÇÃO — NÃO ENTRAR" :
+               candidate.status === "EXPIRED" ? "🕒 PRÉ-ALERTA EXPIRADO" : "⛔ CANCELADO POR CONFLITO"}
             </p>
             <div className="text-sm text-slate-200">
               {candidate.decision} • {candidate.asset} • {candidate.timeframe} / {candidate.expiration}
@@ -1180,10 +1198,13 @@ export default function App() {
             </button>
           </div>
           <div className={`mt-3 rounded-lg p-3 ${candidate.status === "CANCELLED" ? "bg-red-950/50 text-red-200" :
-            candidate.status === "CONFIRMED" ? "bg-green-950/40 text-green-200" : "bg-amber-950/40 text-amber-200"}`}>
+            candidate.status === "CONFIRMED" || candidate.status === "CLOSED" ? "bg-green-950/40 text-green-200" : "bg-amber-950/40 text-amber-200"}`}>
             <p className="text-sm font-bold">
               {candidate.status === "PRE_ALERT" ? "🔔 PRÉ-ALERTA — NÃO ENTRAR" :
-                candidate.status === "CONFIRMED" ? "✅ SINAL RECONFIRMADO" : "⛔ SINAL CANCELADO"}
+                candidate.status === "CONFIRMED" ? "✅ SINAL RECONFIRMADO" :
+                candidate.status === "CLOSED" ? "🕒 HORÁRIO ENCERRADO — RECONFIRMADO" :
+                candidate.status === "UNVERIFIED" ? "⚠️ SEM CONFIRMAÇÃO — NÃO ENTRAR" :
+                candidate.status === "EXPIRED" ? "🕒 PRÉ-ALERTA EXPIRADO" : "⛔ CANCELADO POR CONFLITO"}
             </p>
             <p className="mt-2 text-lg font-extrabold">{candidate.decision}</p>
             <p className="text-xs">{candidate.asset} · {candidate.timeframe} · Exp. {candidate.expiration}</p>
