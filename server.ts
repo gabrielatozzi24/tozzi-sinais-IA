@@ -31,6 +31,10 @@ async function startServer() {
     try {
       const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration } = req.body;
 
+      if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: "Configure GEMINI_API_KEY no Render." });
+      if (typeof imageBase64 !== "string" || !imageBase64.startsWith("data:image/")) {
+        return res.status(400).json({ error: "Imagem de captura inválida." });
+      }
       if (!imageBase64) {
         return res.status(400).json({ error: "Nenhuma imagem de gráfico fornecida." });
       }
@@ -52,11 +56,11 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const prompt = `Analise esta captura de tela do gráfico OTC. Ativo esperado: ${selectedAsset}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Retorne o resultado em JSON.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
+        model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
         contents: [
           {
             inlineData: {
-              mimeType: "image/png",
+              mimeType: imageBase64.startsWith("data:image/jpeg") ? "image/jpeg" : "image/png",
               data: cleanBase64,
             },
           },
