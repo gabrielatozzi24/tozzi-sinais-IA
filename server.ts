@@ -233,6 +233,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(broadcastPayload);
       }
       analysisData.phase = stage;
+      analysisData.phaseEvent = phaseEvent;
       analysisData.targetEpoch = target;
       analysisData.serverNow = Date.now();
 
