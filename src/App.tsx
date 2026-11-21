@@ -399,6 +399,9 @@ export default function App() {
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white">
       {/* Hidden canvas for sampling */}
       <canvas ref={canvasRef} className="hidden" />
+      {/* Keep a decoder mounted while user views alerts/history, so captures can continue. */}
+      {activeTab !== "monitor" && <video ref={videoRef} autoPlay playsInline muted className="hidden" />}
+
 
       {/* Header */}
       <header className="bg-[#121620] border-b border-purple-900/30 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-lg shadow-purple-950/20">
