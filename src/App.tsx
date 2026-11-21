@@ -518,7 +518,10 @@ export default function App() {
           </div>
 
           <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
+            onClick={() => {
+              setSoundEnabled(!soundEnabled);
+              if (!soundEnabled) playAlertSound("TESTE");
+            }
             className={`p-2 rounded-xl border transition-all ${
               soundEnabled
                 ? "bg-purple-950/40 border-purple-500/40 text-purple-300"
@@ -537,6 +540,36 @@ export default function App() {
           onChange={e => setAccessCode(e.target.value.trim())}
           placeholder="Código configurado no Render" className="min-w-[210px] rounded-md bg-slate-900 text-white border border-slate-600 px-3 py-2 text-sm" />
         {!accessCode && <span className="text-xs text-amber-300">Configure TOZZI_ACCESS_CODE no Render antes de analisar ou receber sinais.</span>}
+      </section>
+
+      <section className="mx-4 mt-3 rounded-xl border border-purple-500/40 bg-[#121620] p-4 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-purple-200">ALERTA ANTECIPADO • TOZZI SINAIS IA</h2>
+          <span className="text-xs text-slate-400">2 robôs: Vision Bot + Signal Guard</span>
+        </div>
+        {candidate ? (
+          <div className="space-y-2">
+            <p className={`text-lg font-bold ${candidate.status === "CANCELLED" ? "text-red-400" : candidate.status === "CONFIRMED" ? "text-green-300" : "text-amber-300"}`}>
+              {candidate.status === "PRE_ALERT" ? "🔔 PRÉ-ALERTA — NÃO ENTRAR AINDA" :
+               candidate.status === "CONFIRMED" ? "✅ RECONFIRMADO — AGUARDE O HORÁRIO" : "⛔ SINAL CANCELADO"}
+            </p>
+            <div className="text-sm text-slate-200">
+              {candidate.decision} • {candidate.asset} • {candidate.timeframe} / {candidate.expiration}
+            </div>
+            <div className="text-xl font-bold text-white">
+              Entrada prevista: {formatEntryTime(candidate.targetEpoch)}
+            </div>
+            <p className="text-sm text-slate-300">
+              {candidate.targetEpoch > nowEpoch
+                ? "Faltam " + Math.ceil((candidate.targetEpoch - nowEpoch) / 1000) + " segundos"
+                : "Horário alcançado — verifique o gráfico atual; não opere por um alerta vencido."}
+            </p>
+            <p className="text-xs text-amber-200">{candidate.reason}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">Nenhum pré-alerta ativo. Quando uma oportunidade passar nos dois filtros, aparecerão direção, horário previsto e aviso sonoro. É necessário reconfirmar antes da entrada.</p>
+        )}
+        <p className="text-[11px] text-slate-500">Horário calculado pelo relógio do dispositivo; confira se está sincronizado com a corretora. Áudio no iPhone depende do navegador e da tela ativa. Nenhum sinal garante WIN.</p>
       </section>
 
       {/* Navigation Tabs */}
