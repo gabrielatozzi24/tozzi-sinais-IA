@@ -522,7 +522,7 @@ export default function App() {
             onClick={() => {
               setSoundEnabled(!soundEnabled);
               if (!soundEnabled) playAlertSound("TESTE");
-            }
+            }}
             className={`p-2 rounded-xl border transition-all ${
               soundEnabled
                 ? "bg-purple-950/40 border-purple-500/40 text-purple-300"
