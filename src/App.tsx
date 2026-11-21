@@ -28,7 +28,8 @@ import {
   Check,
   TrendingUp,
   TrendingDown,
-  Gauge
+  Gauge,
+  Bell
 } from "lucide-react";
 
 interface SignalRecord {
@@ -113,10 +114,43 @@ export default function App() {
   type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED"; reason: string };
   const candidateRef = useRef<Candidate | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
+  const [dismissedPopupKey, setDismissedPopupKey] = useState("");
+  const [browserNotifications, setBrowserNotifications] = useState<NotificationPermission | "unsupported">(
+    typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported"
+  );
+  const popupKey = candidate ? `${candidate.targetEpoch}-${candidate.status}` : "";
+  const popupVisible = Boolean(candidate) && popupKey !== dismissedPopupKey;
+  const enableBrowserNotifications = async () => {
+    if (!("Notification" in window)) { setBrowserNotifications("unsupported"); return; }
+    try {
+      const permission = await Notification.requestPermission();
+      setBrowserNotifications(permission);
+      if (permission === "granted") playAlertSound("TESTE");
+    } catch (error) { console.warn("Browser notification permission failed:", error); }
+  };
+  const notifyBrowser = (signal: Candidate) => {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      const prefix = signal.status === "PRE_ALERT" ? "🔔 Pré-alerta — NÃO ENTRAR" :
+        signal.status === "CONFIRMED" ? "✅ Reconfirmado — confira horário" : "⛔ Sinal cancelado";
+      const notification = new Notification(`${prefix} • ${signal.asset}`, {
+        body: `${signal.decision} • ${formatEntryTime(signal.targetEpoch)} • ${signal.reason}`,
+        tag: `tozzi-${signal.targetEpoch}-${signal.status}`
+      });
+      notification.onclick = () => { window.focus(); setActiveTab("alerts"); notification.close(); };
+    } catch (error) { console.warn("Browser notification unavailable:", error); }
+  };
   const [nowEpoch, setNowEpoch] = useState(Date.now());
   const confirmBusyRef = useRef(false);
   const audioRef = useRef<AudioContext | null>(null);
-  const setCandidateSafe = (next: Candidate | null) => { candidateRef.current = next; setCandidate(next); };
+  const setCandidateSafe = (next: Candidate | null) => {
+    const previous = candidateRef.current;
+    candidateRef.current = next;
+    setCandidate(next);
+    if (next && (previous?.targetEpoch !== next.targetEpoch || previous.status !== next.status)) {
+      notifyBrowser(next);
+    }
+  };
   useEffect(() => {
     const ticker = setInterval(() => {
       const now = Date.now();
@@ -571,6 +605,12 @@ export default function App() {
           <p className="text-sm text-slate-400">Nenhum pré-alerta ativo. Quando uma oportunidade passar nos dois filtros, aparecerão direção, horário previsto e aviso sonoro. É necessário reconfirmar antes da entrada.</p>
         )}
         <p className="text-[11px] text-slate-500">Horário calculado pelo relógio do dispositivo; confira se está sincronizado com a corretora. Áudio no iPhone depende do navegador e da tela ativa. Nenhum sinal garante WIN.</p>
+        <button type="button" onClick={enableBrowserNotifications}
+          className="text-xs rounded-lg border border-purple-500/40 px-3 py-2 text-purple-200 hover:bg-purple-900/30">
+          {browserNotifications === "granted" ? "✓ Notificações do navegador ativadas" : "🔔 Ativar notificações do navegador"}
+        </button>
+        {browserNotifications === "denied" && <span className="ml-2 text-xs text-amber-300">Permissão bloqueada nas configurações do navegador.</span>}
+        {browserNotifications === "unsupported" && <span className="ml-2 text-xs text-slate-400">Este navegador não oferece notificações nesta página.</span>}
       </section>
 
       {/* Navigation Tabs */}
@@ -1115,6 +1155,42 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Compact popup on the lower-right: never treats a preview as an executed trade. */}
+      {popupVisible && candidate && (
+        <div role="alertdialog" aria-label="Alerta Tozzi Sinais IA" aria-live="assertive"
+          className="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-[370px] z-[100] rounded-2xl border border-purple-400/50 bg-[#121620] p-4 shadow-2xl shadow-purple-950/80">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Bell className="w-5 h-5 text-purple-300" />
+              <strong className="text-sm text-white">TOZZI SINAIS IA</strong>
+            </div>
+            <button type="button" onClick={() => setDismissedPopupKey(popupKey)}
+              aria-label="Fechar notificação" className="rounded-lg p-1 text-slate-400 hover:bg-slate-700 hover:text-white">
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+          <div className={`mt-3 rounded-lg p-3 ${candidate.status === "CANCELLED" ? "bg-red-950/50 text-red-200" :
+            candidate.status === "CONFIRMED" ? "bg-green-950/40 text-green-200" : "bg-amber-950/40 text-amber-200"}`}>
+            <p className="text-sm font-bold">
+              {candidate.status === "PRE_ALERT" ? "🔔 PRÉ-ALERTA — NÃO ENTRAR" :
+                candidate.status === "CONFIRMED" ? "✅ SINAL RECONFIRMADO" : "⛔ SINAL CANCELADO"}
+            </p>
+            <p className="mt-2 text-lg font-extrabold">{candidate.decision}</p>
+            <p className="text-xs">{candidate.asset} · {candidate.timeframe} · Exp. {candidate.expiration}</p>
+            <p className="mt-2 text-base font-semibold">Entrada prevista: {formatEntryTime(candidate.targetEpoch)}</p>
+            <p className="text-xs mt-1">{candidate.targetEpoch > nowEpoch
+              ? `Faltam ${Math.ceil((candidate.targetEpoch - nowEpoch) / 1000)} segundos`
+              : "Horário previsto já alcançado"}</p>
+          </div>
+          <p className="my-3 text-xs text-slate-300">{candidate.reason}</p>
+          <button type="button" onClick={() => { setActiveTab("alerts"); setDismissedPopupKey(popupKey); }}
+            className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 text-sm font-bold text-white p-3">
+            Visualizar sinal
+          </button>
+          <p className="mt-2 text-[10px] text-slate-500">Aviso educativo; não executa ordens e não garante acerto.</p>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="bg-[#121620] border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500">
