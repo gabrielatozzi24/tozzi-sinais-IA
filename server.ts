@@ -171,6 +171,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         vision.currentCandleDirection === expectedCandle &&
         vision.lastClosedCandleDirection === expectedCandle;
       const previousAligned = stage !== "CONFIRM" || priorDirection === direction;
+      const visionAgrees = vision.decision === direction;
       const timeframeAligned = vision.timeframeDetected === selectedTimeframe;
       const assetAligned = String(vision.assetDetected || "").trim().toUpperCase() === String(selectedAsset || "").trim().toUpperCase();
       const remainingMs = target - Date.now();
@@ -179,13 +180,13 @@ Analise minuciosamente a imagem fornecida do gráfico:
         : remainingMs >= 4000 && remainingMs <= 45000;
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
         ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true &&
-        candleAligned && previousAligned && timeframeAligned && assetAligned && withinWindow &&
+        candleAligned && previousAligned && visionAgrees && timeframeAligned && assetAligned && withinWindow &&
         Date.now() - requestStartedAt <= 15000;
       if (!approved) {
         analysisData.guardResult = {
           ...guard, passed: false, finalDecision: "AGUARDAR",
           guardReason: !candleAligned ? "Direção da vela atual e da última vela fechada não confirma o mesmo movimento. Sinal bloqueado."
-            : !previousAligned ? "A direção mudou desde o pré-alerta. Sinal cancelado."
+            : !previousAligned || !visionAgrees ? "Vision Bot e Signal Guard divergem ou a direção mudou. Sinal cancelado."
             : !withinWindow ? "Sinal expirado fora da janela programada."
             : !assetAligned || !timeframeAligned ? "Ativo ou período da captura não confirmado."
             : guard.guardReason || "Condições insuficientes para entrada."
