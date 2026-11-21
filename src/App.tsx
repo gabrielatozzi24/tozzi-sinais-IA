@@ -103,6 +103,11 @@ export default function App() {
   const monitoringLoopRef = useRef<any>(null);
   const lastAnalysisTimestampRef = useRef<number>(0);
   const prevFrameDataRef = useRef<string | null>(null);
+  const analysisBusyRef = useRef(false);
+  const pauseRef = useRef(false);
+  const sessionRef = useRef(0);
+  const activeRequestRef = useRef<AbortController | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   // Diagnostics Test Suite
   const [tests, setTests] = useState<TestItem[]>([
@@ -165,6 +170,10 @@ export default function App() {
   // Start Live Monitoring
   const startMonitoring = async () => {
     try {
+      sessionRef.current++;
+      pauseRef.current = false;
+      prevFrameDataRef.current = null;
+      setAnalysisError(null);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "window" },
         audio: false
@@ -184,7 +193,7 @@ export default function App() {
         stopMonitoring();
       };
 
-      startMonitoringLoop();
+      // Loop starts after video element has mounted.
     } catch (err: any) {
       console.error("Error starting live monitoring:", err);
       alert("Não foi possível iniciar o monitoramento ao vivo. Verifique a permissão do navegador.");
@@ -210,6 +219,10 @@ export default function App() {
 
   // Stop Monitoring
   const stopMonitoring = () => {
+    sessionRef.current++;
+    activeRequestRef.current?.abort();
+    analysisBusyRef.current = false;
+    setIsAnalyzing(false);
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -226,177 +239,138 @@ export default function App() {
   };
 
   const togglePause = () => {
+    pauseRef.current = !isPaused;
+    if (!isPaused) {
+      sessionRef.current++;
+      activeRequestRef.current?.abort();
+      analysisBusyRef.current = false;
+      setIsAnalyzing(false);
+    }
     setIsPaused(!isPaused);
   };
 
-  // Continuous Monitoring Loop (Smart Frame Sampling & Single-Flight Processing)
+  // Single-flight processing: capture only a fresh frame after the previous request completes.
   const startMonitoringLoop = () => {
     if (monitoringLoopRef.current) clearInterval(monitoringLoopRef.current);
-
     monitoringLoopRef.current = setInterval(() => {
-      if (isPaused || !mediaStreamRef.current || !videoRef.current || !canvasRef.current) return;
-
       const video = videoRef.current;
       const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
-
-      if (!ctx || video.videoWidth === 0 || video.videoHeight === 0) return;
-
-      // Capture frame at reduced resolution for efficiency (saving bandwidth & tokens)
-      canvas.width = 960;
-      canvas.height = 540;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const nowTimeStr = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      setLastCaptureTime(nowTimeStr);
-
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-
-      // Simple visual change detection (sample data hash or size) to avoid redundant AI calls
-      const sampleHash = dataUrl.substring(100, 250);
-      const hasChanged = sampleHash !== prevFrameDataRef.current;
-      prevFrameDataRef.current = sampleHash;
-      setChangeDetected(hasChanged);
-
+      const track = mediaStreamRef.current?.getVideoTracks()[0];
+      if (pauseRef.current || analysisBusyRef.current || !video || !canvas || !track || track.readyState !== "live" || video.videoWidth < 1) return;
       const now = Date.now();
-      const elapsedSinceLastAnalysis = now - lastAnalysisTimestampRef.current;
-      const minIntervalMs = minSecondsBetweenAnalysis * 1000;
-
-      // Single-flight check: if already analyzing, skip this tick
-      if (isAnalyzing) return;
-
-      // Trigger analysis only if visual change detected OR interval elapsed
-      if (hasChanged || elapsedSinceLastAnalysis >= minIntervalMs) {
-        lastAnalysisTimestampRef.current = now;
-        processFrameAnalysis(dataUrl, now);
-      }
-    }, 2000); // Check every 2 seconds
+      if (now - lastAnalysisTimestampRef.current < minSecondsBetweenAnalysis * 1000) return;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      canvas.width = 1024;
+      canvas.height = Math.max(1, Math.round(1024 * video.videoHeight / video.videoWidth));
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setLastCaptureTime(new Date(now).toLocaleTimeString("pt-BR"));
+      // Sample actual image pixels, not the fixed prefix of base64 data.
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let hash = 2166136261;
+      const stride = Math.max(4, Math.floor(pixels.length / 256 / 4) * 4);
+      for (let i = 0; i < pixels.length; i += stride) hash = Math.imul(hash ^ pixels[i], 16777619);
+      const fingerprint = String(hash >>> 0);
+      const changed = prevFrameDataRef.current !== fingerprint;
+      prevFrameDataRef.current = fingerprint;
+      setChangeDetected(changed);
+      if (!changed) return;
+      lastAnalysisTimestampRef.current = now;
+      void processFrameAnalysis(canvas.toDataURL("image/jpeg", 0.7), now, sessionRef.current);
+    }, 2000);
   };
 
-  const processFrameAnalysis = async (dataUrl: string, captureTimestamp: number) => {
+  const processFrameAnalysis = async (dataUrl: string, captureTimestamp: number, sessionId: number) => {
+    if (analysisBusyRef.current) return;
+    analysisBusyRef.current = true;
     setIsAnalyzing(true);
-    const networkStart = Date.now();
-
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
+    const timer = setTimeout(() => controller.abort(), 17000);
     try {
       const res = await fetch("/api/analyze-chart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageBase64: dataUrl,
-          selectedAsset: customAsset || selectedAsset,
-          selectedTimeframe,
-          selectedExpiration
-        })
+        signal: controller.signal,
+        body: JSON.stringify({ imageBase64: dataUrl, selectedAsset: customAsset || selectedAsset, selectedTimeframe, selectedExpiration })
       });
-
-      const analysisEnd = Date.now();
-      const latencyMs = analysisEnd - captureTimestamp;
+      if (sessionId !== sessionRef.current || pauseRef.current || !mediaStreamRef.current) return;
+      const latencyMs = Date.now() - captureTimestamp;
       setTotalLatency(latencyMs);
-      setApiCallCount((prev) => prev + 1);
-
+      setApiCallCount(v => v + 1);
       if (!res.ok) {
-        throw new Error("Erro na resposta do servidor.");
+        const details = await res.json().catch(() => ({}));
+        throw new Error(details?.error || "Erro HTTP " + res.status);
       }
-
       const data = await res.json();
+      if (!data?.visionResult || !data?.guardResult) throw new Error("Resposta incompleta da IA.");
+      setLastAnalysisTime(new Date().toLocaleTimeString("pt-BR"));
+      const guard = data.guardResult;
+      const ch = guard.checks || {};
+      const expired = latencyMs > maxLatencyLimit;
+      const passed = !expired && guard.passed === true && ch.blurry === false && ch.incomplete === false &&
+        ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true;
+      const requested = guard.finalDecision;
+      const decision: SignalRecord["decision"] = passed && (requested === "POSSÍVEL COMPRA" || requested === "POSSÍVEL VENDA") ? requested : "AGUARDAR";
+      const reason = expired ? "SINAL EXPIRADO: " + (latencyMs / 1000).toFixed(1) + " segundos de atraso."
+        : decision === "AGUARDAR" ? "BLOQUEIO: " + (guard.guardReason || data.visionResult.reason || "Sem confirmação.")
+        : (guard.guardReason || data.visionResult.reason || "Análise visual");
       setCurrentVisionResult(data.visionResult);
-      setCurrentGuardResult(data.guardResult);
-      setLastAnalysisTime(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
-
-      // Check latency limit (Sinal Expirado if > maxLatencyLimit)
-      const isExpired = latencyMs > maxLatencyLimit;
-      const finalDecision = isExpired ? "AGUARDAR" : (data.guardResult?.finalDecision || "AGUARDAR");
-      const finalReason = isExpired ? "SINAL EXPIRADO: Latência acima do limite configurado." : (data.guardResult?.guardReason || data.visionResult?.reason);
-
-      const newRecord: SignalRecord = {
-        id: Math.random().toString(36).substring(2, 9),
-        timestamp: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-        asset: customAsset || selectedAsset,
-        timeframe: selectedTimeframe,
-        expiration: selectedExpiration,
-        decision: finalDecision,
-        reason: finalReason,
-        guardPassed: data.guardResult?.passed && !isExpired,
-        guardReason: finalReason,
-        latencyMs,
-        result: "PENDENTE"
-      };
-
-      setSignalsHistory((prev) => [newRecord, ...prev.slice(0, 49)]);
-
-      if (soundEnabled && finalDecision !== "AGUARDAR") {
-        playAlertSound(finalDecision);
-      }
-    } catch (err) {
-      console.error("Analysis failed:", err);
+      setCurrentGuardResult({ ...guard, passed: decision !== "AGUARDAR", guardReason: reason });
+      setAnalysisError(null);
+      const record: SignalRecord = { id: crypto.randomUUID(), timestamp: new Date().toLocaleTimeString("pt-BR"),
+        asset: customAsset || selectedAsset, timeframe: selectedTimeframe, expiration: selectedExpiration,
+        decision, reason, guardPassed: decision !== "AGUARDAR", guardReason: reason, latencyMs, result: "PENDENTE" };
+      setSignalsHistory(prev => [record, ...prev.slice(0, 49)]);
+      if (soundEnabled && decision !== "AGUARDAR") playAlertSound(decision);
+    } catch (err: any) {
+      if (sessionId !== sessionRef.current) return;
+      const reason = err?.name === "AbortError" ? "Análise excedeu 17 segundos; sinal descartado." : err?.message || "Erro de análise";
+      setAnalysisError(reason);
+      setCurrentGuardResult({ passed: false, finalDecision: "AGUARDAR", guardReason: reason,
+        checks: { blurry: false, incomplete: true, assetMatch: false, timeframeMatch: false, contradictory: false, contextOk: false } });
+      console.error("Falha de análise:", err);
     } finally {
-      setIsAnalyzing(false);
+      clearTimeout(timer);
+      if (activeRequestRef.current === controller) activeRequestRef.current = null;
+      if (sessionId === sessionRef.current) { analysisBusyRef.current = false; setIsAnalyzing(false); }
     }
   };
 
   useEffect(() => {
-    if (isMonitoring && !isPaused) {
-      startMonitoringLoop();
-    }
-    return () => {
-      if (monitoringLoopRef.current) clearInterval(monitoringLoopRef.current);
-    };
-  }, [minSecondsBetweenAnalysis, isPaused, isMonitoring, selectedAsset, selectedTimeframe, selectedExpiration]);
+    if (isMonitoring && !isPaused) startMonitoringLoop();
+    return () => { if (monitoringLoopRef.current) clearInterval(monitoringLoopRef.current); };
+  }, [minSecondsBetweenAnalysis, isPaused, isMonitoring, selectedAsset, selectedTimeframe, selectedExpiration, activeTab]);
 
-  // Run automated diagnostic tests
+  // Diagnostics reflect observable state only, never simulated pass labels.
   const runDiagnosticTests = async () => {
-    const updated = [...tests];
-    for (let i = 0; i < updated.length; i++) {
-      updated[i].status = "running";
-      setTests([...updated]);
-
-      await new Promise((r) => setTimeout(r, 500));
-
-      if (i === 0) {
-        updated[i].status = typeof navigator.mediaDevices?.getDisplayMedia === "function" ? "passed" : "failed";
-        updated[i].resultMessage = "API getDisplayMedia suportada para streaming contínuo.";
-      } else if (i === 1) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "Elemento <video> reproduzindo fluxo ao vivo com sucesso.";
-      } else if (i === 2) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "Algoritmo de detecção de mudanças visuais operando.";
-      } else if (i === 3) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "Arquitetura Single-Flight ativa (sem sobreposição de requisições).";
-      } else if (i === 4) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = `Ativo "${selectedAsset}" validado corretamente.`;
-      } else if (i === 5) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "Vision Bot e Signal Guard ativos e rigorosos.";
-      } else if (i === 6) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = `Latência total medida (${totalLatency}ms / Limite: ${maxLatencyLimit}ms).`;
-      } else if (i === 7) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "WebSocket conectado para envio de alertas ao iPhone.";
-      } else if (i === 8) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "Interrupção por término de compartilhamento tratada.";
-      } else if (i === 9) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = `Controle de créditos ativo (Intervalo mín: ${minSecondsBetweenAnalysis}s). Total de chamadas: ${apiCallCount}.`;
-      } else if (i === 10) {
-        updated[i].status = "passed";
-        updated[i].resultMessage = "Restrição estrita a M1/M5 e 1min/5min mantida.";
-      }
-      setTests([...updated]);
-    }
+    const track = mediaStreamRef.current?.getVideoTracks()[0];
+    const mediaOk = typeof navigator.mediaDevices?.getDisplayMedia === "function";
+    const streamOk = !!track && track.readyState === "live";
+    const videoOk = streamOk && !!videoRef.current && videoRef.current.videoWidth > 0;
+    const results: TestItem[] = [
+      { id: 1, name: "Permissão de Monitoramento", description: "Suporte do navegador", status: mediaOk ? "passed" : "failed", resultMessage: mediaOk ? "API disponível (permissão deve ser verificada na captura)." : "API indisponível." },
+      { id: 2, name: "Fluxo Contínuo de Vídeo", description: "Faixa de vídeo ativa", status: videoOk ? "passed" : "failed", resultMessage: videoOk ? "Vídeo recebido." : "Vídeo indisponível: inicie a captura." },
+      { id: 3, name: "Detecção de Mudanças Visuais", description: "Quadro capturado", status: lastCaptureTime ? "passed" : "failed", resultMessage: lastCaptureTime || "Sem captura." },
+      { id: 4, name: "Processamento Single-Flight", description: "Proteção de concorrência", status: "idle", resultMessage: "Implementado em código; ainda não validado sob carga." },
+      { id: 5, name: "Identificação do Ativo OTC", description: "Comparação por IA", status: "idle", resultMessage: "Depende da imagem e resposta verificável." },
+      { id: 6, name: "Vision Bot & Signal Guard", description: "Análise anterior", status: currentGuardResult ? "passed" : "idle", resultMessage: currentGuardResult?.guardReason || "Sem resultado validado." },
+      { id: 7, name: "Proteção contra Atraso", description: "Última latência", status: totalLatency > 0 && totalLatency <= maxLatencyLimit ? "passed" : "failed", resultMessage: totalLatency + "ms / limite " + maxLatencyLimit + "ms" },
+      { id: 8, name: "WebSocket", description: "Conexão com servidor", status: wsConnected ? "passed" : "failed", resultMessage: wsConnected ? "Conectado; entrega ao iPhone ainda requer teste." : "Desconectado." },
+      { id: 9, name: "Interrupção da Captura", description: "Encerra a faixa", status: "idle", resultMessage: "Não testado automaticamente." },
+      { id: 10, name: "Consumo de IA", description: "Chamadas feitas", status: "idle", resultMessage: apiCallCount + " solicitações iniciadas (cotas devem ser consultadas no provedor)." },
+      { id: 11, name: "Períodos", description: "M1/M5", status: selectedTimeframe === "M1" || selectedTimeframe === "M5" ? "passed" : "failed", resultMessage: selectedTimeframe + " / " + selectedExpiration }
+    ];
+    setTests(results);
   };
 
   const updateHistoryResult = (id: string, res: "WIN" | "LOSS") => {
-    setSignalsHistory((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, result: res } : item))
-    );
+    setSignalsHistory(prev => prev.map(item =>
+      item.id === id && item.guardPassed && item.decision !== "AGUARDAR" ? { ...item, result: res } : item
+    ));
   };
 
-  const completedSignals = signalsHistory.filter((s) => s.result === "WIN" || s.result === "LOSS");
+  const completedSignals = signalsHistory.filter(s => s.guardPassed && s.decision !== "AGUARDAR" && (s.result === "WIN" || s.result === "LOSS"));
   const winsCount = completedSignals.filter((s) => s.result === "WIN").length;
   const winRate = completedSignals.length > 0 ? ((winsCount / completedSignals.length) * 100).toFixed(1) : null;
 
@@ -720,6 +694,7 @@ export default function App() {
                     )}
                   </div>
 
+                  {analysisError && <p className="mb-2 text-xs text-amber-300">Falha técnica: {analysisError}</p>}
                   {currentGuardResult ? (
                     <div className="space-y-2 text-xs text-slate-300">
                       <div className="grid grid-cols-2 gap-2">
@@ -912,12 +887,16 @@ export default function App() {
                           <td className="p-3">
                             <div className="flex space-x-1">
                               <button
+                                disabled={!item.guardPassed || item.decision === "AGUARDAR"}
+                                title={item.decision === "AGUARDAR" ? "AGUARDAR não é uma operação" : "Registrar WIN manual"}
                                 onClick={() => updateHistoryResult(item.id, "WIN")}
                                 className={`px-2 py-0.5 rounded font-bold text-[10px] ${item.result === "WIN" ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
                               >
                                 WIN
                               </button>
                               <button
+                                disabled={!item.guardPassed || item.decision === "AGUARDAR"}
+                                title={item.decision === "AGUARDAR" ? "AGUARDAR não é uma operação" : "Registrar LOSS manual"}
                                 onClick={() => updateHistoryResult(item.id, "LOSS")}
                                 className={`px-2 py-0.5 rounded font-bold text-[10px] ${item.result === "LOSS" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
                               >
