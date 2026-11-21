@@ -74,7 +74,7 @@ export default function App() {
   const [selectedExpiration, setSelectedExpiration] = useState<"1min" | "5min">("1min");
   
   // Monitoring & Rate Limiting Configuration
-  const [minSecondsBetweenAnalysis, setMinSecondsBetweenAnalysis] = useState<number>(8); // Economy control
+  const [minSecondsBetweenAnalysis, setMinSecondsBetweenAnalysis] = useState<number>(20); // Conservative default to reduce API calls
   const [maxLatencyLimit, setMaxLatencyLimit] = useState<number>(15000); // 15 seconds max
   const [apiCallCount, setApiCallCount] = useState<number>(0);
 
@@ -229,6 +229,7 @@ export default function App() {
       sessionRef.current++;
       pauseRef.current = false;
       prevFrameDataRef.current = null;
+      confirmBusyRef.current = false;
       setCandidateSafe(null);
       setAnalysisError(null);
       const stream = await navigator.mediaDevices.getDisplayMedia({
