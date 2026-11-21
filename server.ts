@@ -44,8 +44,8 @@ async function startServer() {
       const candleMs = selectedTimeframe === "M5" ? 300000 : 60000;
       // Only the beginning of a real M1/M5 candle is a valid target.
       if (!Number.isFinite(target) || target % candleMs !== 0 ||
-        remainingBefore < (stage === "PREPARE" ? 50000 : 4000) ||
-        remainingBefore > (stage === "PREPARE" ? 90000 : 45000)) {
+        remainingBefore < (stage === "PREPARE" ? 30000 : 4000) ||
+        remainingBefore > (stage === "PREPARE" ? 60000 : 45000)) {
         return res.status(400).json({ error: "Janela de alerta expirou ou horário de entrada inválido." });
       }
       if (!["M1", "M5"].includes(selectedTimeframe) || !["1min", "5min"].includes(selectedExpiration)) {
@@ -185,7 +185,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const assetAligned = String(vision.assetDetected || "").trim().toUpperCase() === String(selectedAsset || "").trim().toUpperCase();
       const remainingMs = target - Date.now();
       const withinWindow = stage === "PREPARE"
-        ? remainingMs >= 50000 && remainingMs <= 85000
+        ? remainingMs >= 30000 && remainingMs <= 60000
         : remainingMs >= 4000 && remainingMs <= 30000;
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
         ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true &&
