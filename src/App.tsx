@@ -111,6 +111,8 @@ export default function App() {
   const sessionRef = useRef(0);
   const activeRequestRef = useRef<AbortController | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const overloadUntilRef = useRef(0);
+  const [overloadUntil, setOverloadUntil] = useState(0);
   type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "UNVERIFIED"; reason: string };
   const candidateRef = useRef<Candidate | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
@@ -370,7 +372,8 @@ export default function App() {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const track = mediaStreamRef.current?.getVideoTracks()[0];
-      if (pauseRef.current || analysisBusyRef.current || !video || !canvas || !track || track.readyState !== "live" || video.videoWidth < 1) return;
+      if (pauseRef.current || analysisBusyRef.current || Date.now() < overloadUntilRef.current ||
+        !video || !canvas || !track || track.readyState !== "live" || video.videoWidth < 1) return;
       const now = Date.now();
       const pending = candidateRef.current;
       let phase: "PREPARE" | "CONFIRM" = "PREPARE";
@@ -441,6 +444,12 @@ export default function App() {
       setApiCallCount(v => v + 1);
       if (!res.ok) {
         const details = await res.json().catch(() => ({}));
+        if (res.status === 503 && details?.type === "GEMINI_UNAVAILABLE") {
+          const retrySeconds = Math.max(30, Math.min(180, Number(details.retryAfterSeconds) || 60));
+          overloadUntilRef.current = Date.now() + retrySeconds * 1000;
+          setOverloadUntil(overloadUntilRef.current);
+          throw new Error(details.error || "Gemini sobrecarregado. Aguardando nova tentativa.");
+        }
         throw new Error(details?.error || "Erro HTTP " + res.status);
       }
       const data = await res.json();
@@ -462,6 +471,8 @@ export default function App() {
       setCurrentVisionResult(data.visionResult);
       setCurrentGuardResult({ ...guard, passed: allowed, finalDecision: allowed ? direction : "AGUARDAR", guardReason: reason });
       setAnalysisError(null);
+      overloadUntilRef.current = 0;
+      setOverloadUntil(0);
       if (phase === "PREPARE") {
         if (allowed) {
           const next: Candidate = { targetEpoch, decision: direction, asset: customAsset || selectedAsset,
@@ -495,8 +506,9 @@ export default function App() {
       if (sessionId !== sessionRef.current) return;
       const reason = err?.name === "AbortError" ? "Análise demorou mais de 17 segundos; descartada." : err?.message || "Erro de análise.";
       setAnalysisError(reason);
-      setCurrentGuardResult({ passed: false, finalDecision: "AGUARDAR", guardReason: reason,
-        checks: { blurry: false, incomplete: true, assetMatch: false, timeframeMatch: false, contradictory: false, contextOk: false } });
+      setCurrentVisionResult(null); // No old analysis should look like a current recommendation.
+      setCurrentGuardResult({ passed: false, technicalError: true, finalDecision: "AGUARDAR", guardReason: reason,
+        checks: {} });
       if (phase === "CONFIRM") {
         const pending = candidateRef.current;
         if (pending && pending.targetEpoch === targetEpoch) setCandidateSafe({ ...pending, status: "UNVERIFIED", reason: "SEM CONFIRMAÇÃO: " + reason + " Não entre com base nesse pré-alerta." });
@@ -921,7 +933,14 @@ export default function App() {
                   </div>
 
                   {analysisError && <p className="mb-2 text-xs text-amber-300">Falha técnica: {analysisError}</p>}
-                  {currentGuardResult ? (
+                  {overloadUntil > nowEpoch && <p className="mb-2 text-xs text-amber-200">
+                    Gemini em pausa automática. Nova tentativa em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos.
+                  </p>}
+                  {currentGuardResult?.technicalError ? (
+                    <p className="text-xs text-amber-300 rounded-xl bg-amber-950/20 p-3">
+                      Serviço de IA indisponível. Nenhuma verificação do gráfico foi concluída e nenhum sinal está liberado.
+                    </p>
+                  ) : currentGuardResult ? (
                     <div className="space-y-2 text-xs text-slate-300">
                       <div className="grid grid-cols-2 gap-2">
                         <div className="flex items-center space-x-1.5">
