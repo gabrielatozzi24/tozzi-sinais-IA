@@ -366,8 +366,14 @@ export default function App() {
       } else {
         if (pending && now < pending.targetEpoch + 3500) return;
         if (now - lastAnalysisTimestampRef.current < minSecondsBetweenAnalysis * 1000) return;
+        // Target the NEXT M1/M5 candle boundary, never skip extra candles merely
+        // to create a long lead time. Look only in the ~one-minute alert window.
         const bucketMs = selectedTimeframe === "M5" ? 300000 : 60000;
-        targetEpoch = Math.ceil((now + 75000) / bucketMs) * bucketMs;
+        targetEpoch = Math.ceil((now + 60000) / bucketMs) * bucketMs;
+        const leadMs = targetEpoch - now;
+        // Request around 65–90 seconds before the candle: Gemini response should
+        // arrive around one minute before entry. Otherwise skip this candle.
+        if (leadMs < 65000 || leadMs > 90000) return;
       }
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) { confirmBusyRef.current = false; return; }
@@ -422,13 +428,16 @@ export default function App() {
       setLastAnalysisTime(new Date().toLocaleTimeString("pt-BR"));
       const guard = data.guardResult;
       const expired = latencyMs > maxLatencyLimit;
+      const serverClockOffset = Number(data.serverNow) - Date.now();
+      const clockMismatch = !Number.isFinite(serverClockOffset) || Math.abs(serverClockOffset) > 6000;
       const direction = guard.finalDecision;
       const approved = !expired && guard.passed === true && (direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA");
       const remain = targetEpoch - Date.now();
-      const windowOk = phase === "PREPARE" ? remain >= 60000 : remain >= 4000 && remain <= 30000;
-      const allowed = approved && windowOk && (phase === "PREPARE" || priorDirection === direction);
+      const windowOk = phase === "PREPARE" ? remain >= 50000 && remain <= 85000 : remain >= 4000 && remain <= 30000;
+      const allowed = approved && windowOk && !clockMismatch && (phase === "PREPARE" || priorDirection === direction);
       const reason = expired ? "SINAL EXPIRADO: " + (latencyMs / 1000).toFixed(1) + " s."
-        : !windowOk ? "Horário de entrada perdeu validade."
+        : clockMismatch ? "Relógio do notebook e servidor estão desencontrados. Sincronize a hora antes de monitorar."
+        : !windowOk ? "Fora da janela de aproximadamente 1 minuto para a próxima vela."
         : guard.guardReason || data.visionResult.reason || "Condição indefinida.";
       setCurrentVisionResult(data.visionResult);
       setCurrentGuardResult({ ...guard, passed: allowed, finalDecision: allowed ? direction : "AGUARDAR", guardReason: reason });
@@ -604,7 +613,7 @@ export default function App() {
         ) : (
           <p className="text-sm text-slate-400">Nenhum pré-alerta ativo. Quando uma oportunidade passar nos dois filtros, aparecerão direção, horário previsto e aviso sonoro. É necessário reconfirmar antes da entrada.</p>
         )}
-        <p className="text-[11px] text-slate-500">Horário calculado pelo relógio do dispositivo; confira se está sincronizado com a corretora. Áudio no iPhone depende do navegador e da tela ativa. Nenhum sinal garante WIN.</p>
+        <p className="text-[11px] text-slate-500">Entrada prevista no início da próxima vela M1/M5, pelo relógio do notebook. Confirme o relógio e a vela atual da Safirion antes de agir; não há sincronização direta com a corretora. Áudio no iPhone depende do navegador e da tela ativa. Nenhum sinal garante WIN.</p>
         <button type="button" onClick={enableBrowserNotifications}
           className="text-xs rounded-lg border border-purple-500/40 px-3 py-2 text-purple-200 hover:bg-purple-900/30">
           {browserNotifications === "granted" ? "✓ Notificações do navegador ativadas" : "🔔 Ativar notificações do navegador"}
