@@ -204,7 +204,7 @@ export default function App() {
             (direction !== "POSSÍVEL COMPRA" && direction !== "POSSÍVEL VENDA"))) return;
           const active = candidateRef.current;
           if (data.type === "PRE_ALERT") {
-            if (targetEpoch < Date.now() + 45000) return;
+            if (targetEpoch < Date.now() + 30000) return;
             const next: Candidate = { targetEpoch, decision: direction, asset: data.asset,
               timeframe: data.timeframe, expiration: data.expiration,
               status: "PRE_ALERT", reason: "Pré-alerta. NÃO ENTRAR: aguarde confirmação perto do horário." };
@@ -369,11 +369,11 @@ export default function App() {
         // Target the NEXT M1/M5 candle boundary, never skip extra candles merely
         // to create a long lead time. Look only in the ~one-minute alert window.
         const bucketMs = selectedTimeframe === "M5" ? 300000 : 60000;
-        targetEpoch = Math.ceil((now + 60000) / bucketMs) * bucketMs;
+        targetEpoch = Math.ceil((now + 1) / bucketMs) * bucketMs;
         const leadMs = targetEpoch - now;
-        // Request around 65–90 seconds before the candle: Gemini response should
-        // arrive around one minute before entry. Otherwise skip this candle.
-        if (leadMs < 65000 || leadMs > 90000) return;
+        // ONLY target the immediately upcoming candle. If less than ~45 seconds
+        // remain before analysis, skip; never shift the signal to the next-next candle.
+        if (leadMs < 45000 || leadMs > 60000) return;
       }
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       if (!ctx) { confirmBusyRef.current = false; return; }
@@ -433,7 +433,7 @@ export default function App() {
       const direction = guard.finalDecision;
       const approved = !expired && guard.passed === true && (direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA");
       const remain = targetEpoch - Date.now();
-      const windowOk = phase === "PREPARE" ? remain >= 50000 && remain <= 85000 : remain >= 4000 && remain <= 30000;
+      const windowOk = phase === "PREPARE" ? remain >= 30000 && remain <= 60000 : remain >= 4000 && remain <= 30000;
       const allowed = approved && windowOk && !clockMismatch && (phase === "PREPARE" || priorDirection === direction);
       const reason = expired ? "SINAL EXPIRADO: " + (latencyMs / 1000).toFixed(1) + " s."
         : clockMismatch ? "Relógio do notebook e servidor estão desencontrados. Sincronize a hora antes de monitorar."
