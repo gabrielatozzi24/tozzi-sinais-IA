@@ -95,6 +95,8 @@ export default function App() {
   // Sound & Notifications
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
+  const [accessCode, setAccessCode] = useState(() => localStorage.getItem("tozzi_signals_access") || "");
+  useEffect(() => { localStorage.setItem("tozzi_signals_access", accessCode); }, [accessCode]);
 
   // Media stream refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -128,7 +130,11 @@ export default function App() {
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
+    if (!accessCode || !/^[A-Za-z0-9_-]{8,64}$/.test(accessCode)) {
+      setWsConnected(false);
+      return;
+    }
+    const ws = new WebSocket(wsUrl, ["tozzi-signals", accessCode]);
 
     ws.onopen = () => setWsConnected(true);
     ws.onclose = () => setWsConnected(false);
@@ -168,7 +174,7 @@ export default function App() {
     return () => {
       ws.close();
     };
-  }, [soundEnabled]);
+  }, [soundEnabled, accessCode]);
 
   // Audio beep
   const playAlertSound = (decision: string) => {
@@ -311,7 +317,7 @@ export default function App() {
     try {
       const res = await fetch("/api/analyze-chart", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Tozzi-Access": accessCode },
         signal: controller.signal,
         body: JSON.stringify({ imageBase64: dataUrl, selectedAsset: customAsset || selectedAsset, selectedTimeframe, selectedExpiration })
       });
@@ -445,6 +451,14 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <section className="bg-[#121620] px-4 py-2 border-b border-slate-800 flex flex-wrap items-center gap-3">
+        <label className="text-xs text-purple-200" htmlFor="tozzi-access">Código privado (mesmo no notebook e no celular)</label>
+        <input id="tozzi-access" type="password" autoComplete="off" value={accessCode}
+          onChange={e => setAccessCode(e.target.value.trim())}
+          placeholder="Código configurado no Render" className="min-w-[210px] rounded-md bg-slate-900 text-white border border-slate-600 px-3 py-2 text-sm" />
+        {!accessCode && <span className="text-xs text-amber-300">Configure TOZZI_ACCESS_CODE no Render antes de analisar ou receber sinais.</span>}
+      </section>
 
       {/* Navigation Tabs */}
       <div className="bg-[#121620]/80 backdrop-blur border-b border-slate-800/80 px-4 flex space-x-2 overflow-x-auto">
