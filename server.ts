@@ -201,8 +201,26 @@ Analise minuciosamente a imagem fornecida do gráfico:
             : guard.guardReason || "Condições insuficientes para entrada."
         };
       }
-      const phaseEvent = stage === "PREPARE" ? "PRE_ALERT" : approved ? "CONFIRMED" : "CANCELLED";
-      // A cancellation is relayed only for the confirmation stage.
+      // An inconclusive second image is NOT evidence that the direction reversed.
+      // Reserve "CANCELLED" for an explicitly visible, material opposite move.
+      const oppositeCandle = expectedCandle === "ALTA" ? "BAIXA" : "ALTA";
+      const clearReversal = !approved && expectedCandle !== "" &&
+        ch.contradictory === true &&
+        vision.currentCandleDirection === oppositeCandle &&
+        vision.trendSupportsDirection === false &&
+        vision.minorCountertrendPullback === false;
+      const phaseEvent = stage === "PREPARE" ? "PRE_ALERT" :
+        approved ? "CONFIRMED" : clearReversal ? "CANCELLED" : "UNVERIFIED";
+      if (!approved && stage === "CONFIRM") {
+        analysisData.guardResult = {
+          ...analysisData.guardResult,
+          guardReason: clearReversal
+            ? "Conflito confirmado: estrutura contrária e pressão oposta na vela atual. Pré-alerta cancelado."
+            : "Reconfirmação inconclusiva. Pré-alerta NÃO confirmado: " +
+              (analysisData.guardResult?.guardReason || "condições não verificadas.")
+        };
+      }
+      // Never release an entry if the guard fails. Relay the actual failure reason.
       if (approved || stage === "CONFIRM") {
         const broadcastPayload = JSON.stringify({
           type: phaseEvent,
