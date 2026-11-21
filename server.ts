@@ -37,7 +37,17 @@ async function startServer() {
   app.post("/api/analyze-chart", async (req, res) => {
     const requestStartedAt = Date.now();
     try {
-      const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration } = req.body;
+      const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection } = req.body;
+      const stage = phase === "CONFIRM" ? "CONFIRM" : "PREPARE";
+      const target = Number(targetEpoch);
+      const remainingBefore = target - Date.now();
+      if (!Number.isFinite(target) || remainingBefore < (stage === "PREPARE" ? 60000 : 4000) ||
+        remainingBefore > (stage === "PREPARE" ? 420000 : 45000)) {
+        return res.status(400).json({ error: "Janela de alerta expirou ou horário de entrada inválido." });
+      }
+      if (!["M1", "M5"].includes(selectedTimeframe) || !["1min", "5min"].includes(selectedExpiration)) {
+        return res.status(400).json({ error: "Período ou expiração inválidos." });
+      }
 
       if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: "Configure GEMINI_API_KEY no Render." });
       if (typeof imageBase64 !== "string" || !imageBase64.startsWith("data:image/")) {
@@ -58,10 +68,14 @@ Analise minuciosamente a imagem fornecida do gráfico:
 2. Identifique a tendência aparente, posição das velas recentes, EMA 21 (se visível), suportes e resistências, rejeições, rompimentos e zonas de indecisão.
 3. Aplique o rigor do Signal Guard: bloqueie sinais (retornando AGUARDAR) se a imagem estiver borrada, incompleta, ativo divergente, período indefinido, sinais contraditórios ou contexto insuficiente.
 4. NUNCA invente indicadores não visíveis nem preveja com certeza absoluta o próximo candle. Seja estritamente educativo e analítico.
-5. Retorne estritamente um JSON com a estrutura solicitada.
+5. Na avaliação de COMPRA, exija confirmação de pressão compradora nas velas recentes; em VENDA, pressão vendedora. Se as velas recentes ou a vela atual estiverem visivelmente contra a proposta, ou se a direção não puder ser verificada, escolha AGUARDAR.
+6. Classifique a direção da vela atual e da última vela fechada EXCLUSIVAMENTE se estiverem nítidas na captura. Use ALTA, BAIXA ou INDEFINIDA.
+7. Se houver divergência entre candle atual, tendência, suporte/resistência e sinal proposto, marque contradictory=true, passed=false e AGUARDAR.
+8. Esta é uma hipótese educacional para uma futura entrada, não uma previsão confiável nem recomendação definitiva. Não há garantia de acerto.
+9. Retorne estritamente um JSON com a estrutura solicitada.
 `;
 
-      const prompt = `Analise esta captura de tela do gráfico OTC. Ativo esperado: ${selectedAsset}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Retorne o resultado em JSON.`;
+      const prompt = `Analise a captura OTC. Ativo: ${selectedAsset}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
 
       const response = await ai.models.generateContent({
         model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
@@ -91,9 +105,11 @@ Analise minuciosamente a imagem fornecida do gráfico:
                   supportResistance: { type: Type.STRING },
                   candlesSummary: { type: Type.STRING },
                   decision: { type: Type.STRING, description: "POSSÍVEL COMPRA, POSSÍVEL VENDA ou AGUARDAR" },
+                  currentCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
+                  lastClosedCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
                   reason: { type: Type.STRING }
                 },
-                required: ["assetDetected", "isOtc", "timeframeDetected", "trend", "decision", "reason"]
+                required: ["assetDetected", "isOtc", "timeframeDetected", "trend", "decision", "reason", "currentCandleDirection", "lastClosedCandleDirection"]
               },
               guardResult: {
                 type: Type.OBJECT,
@@ -145,29 +161,51 @@ Analise minuciosamente a imagem fornecida do gráfico:
         };
       }
 
-      // Broadcast only guarded, fresh signals; never broadcast AGUARDAR.
-      const check = analysisData.guardResult?.checks;
-      const elapsedMs = Date.now() - requestStartedAt;
-      const approved = analysisData.guardResult?.passed === true &&
-        check?.blurry === false && check?.incomplete === false &&
-        check?.assetMatch === true && check?.timeframeMatch === true &&
-        check?.contradictory === false && check?.contextOk === true &&
-        (analysisData.guardResult.finalDecision === "POSSÍVEL COMPRA" ||
-         analysisData.guardResult.finalDecision === "POSSÍVEL VENDA");
-      if (approved && elapsedMs <= 12000) {
+      // The model alone cannot approve a trade. Apply deterministic direction/time safeguards.
+      const vision = analysisData.visionResult || {};
+      const guard = analysisData.guardResult || {};
+      const ch = guard.checks || {};
+      const direction = guard.finalDecision;
+      const expectedCandle = direction === "POSSÍVEL COMPRA" ? "ALTA" : direction === "POSSÍVEL VENDA" ? "BAIXA" : "";
+      const candleAligned = expectedCandle !== "" &&
+        vision.currentCandleDirection === expectedCandle &&
+        vision.lastClosedCandleDirection === expectedCandle;
+      const previousAligned = stage !== "CONFIRM" || priorDirection === direction;
+      const timeframeAligned = vision.timeframeDetected === selectedTimeframe;
+      const assetAligned = String(vision.assetDetected || "").trim().toUpperCase() === String(selectedAsset || "").trim().toUpperCase();
+      const remainingMs = target - Date.now();
+      const withinWindow = stage === "PREPARE"
+        ? remainingMs >= 60000 && remainingMs <= 420000
+        : remainingMs >= 4000 && remainingMs <= 45000;
+      const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
+        ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true &&
+        candleAligned && previousAligned && timeframeAligned && assetAligned && withinWindow &&
+        Date.now() - requestStartedAt <= 15000;
+      if (!approved) {
+        analysisData.guardResult = {
+          ...guard, passed: false, finalDecision: "AGUARDAR",
+          guardReason: !candleAligned ? "Direção da vela atual e da última vela fechada não confirma o mesmo movimento. Sinal bloqueado."
+            : !previousAligned ? "A direção mudou desde o pré-alerta. Sinal cancelado."
+            : !withinWindow ? "Sinal expirado fora da janela programada."
+            : !assetAligned || !timeframeAligned ? "Ativo ou período da captura não confirmado."
+            : guard.guardReason || "Condições insuficientes para entrada."
+        };
+      }
+      const phaseEvent = stage === "PREPARE" ? "PRE_ALERT" : approved ? "CONFIRMED" : "CANCELLED";
+      // A cancellation is relayed only for the confirmation stage.
+      if (approved || stage === "CONFIRM") {
         const broadcastPayload = JSON.stringify({
-          type: "NEW_SIGNAL",
+          type: phaseEvent,
           timestamp: new Date().toISOString(),
-          asset: selectedAsset,
-          timeframe: selectedTimeframe,
-          expiration: selectedExpiration,
-          latencyMs: elapsedMs,
+          targetEpoch: target,
+          asset: selectedAsset, timeframe: selectedTimeframe, expiration: selectedExpiration,
+          latencyMs: Date.now() - requestStartedAt,
           ...analysisData
         });
-        for (const client of clients) {
-          if (client.readyState === WebSocket.OPEN) client.send(broadcastPayload);
-        }
+        for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(broadcastPayload);
       }
+      analysisData.phase = stage;
+      analysisData.targetEpoch = target;
 
       res.json(analysisData);
     } catch (error: any) {
