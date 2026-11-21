@@ -239,9 +239,21 @@ Analise minuciosamente a imagem fornecida do gráfico:
 
       res.json(analysisData);
     } catch (error: any) {
+      const raw = String(error?.message || error || "");
+      const overloaded = error?.status === 503 || error?.code === 503 ||
+        /"code"\s*:\s*503|high demand|UNAVAILABLE|overloaded|resource exhausted|rate limit/i.test(raw);
+      if (overloaded) {
+        console.warn("Gemini temporariamente indisponível; nova tentativa somente após pausa.");
+        return res.status(503).set("Retry-After", "60").json({
+          error: "Gemini temporariamente sobrecarregado (503). Análise não realizada; aguarde 60 segundos.",
+          type: "GEMINI_UNAVAILABLE",
+          retryAfterSeconds: 60
+        });
+      }
       console.error("Error analyzing chart:", error);
       res.status(500).json({
-        error: error.message || "Erro interno ao processar análise do gráfico.",
+        error: "Falha técnica ao processar análise; nenhum sinal foi validado.",
+        type: "ANALYSIS_ERROR"
       });
     }
   });
