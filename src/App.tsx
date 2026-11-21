@@ -136,8 +136,29 @@ export default function App() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "NEW_SIGNAL" && soundEnabled) {
-          playAlertSound(data.visionResult?.decision);
+        if (data.type === "NEW_SIGNAL" && !mediaStreamRef.current) {
+          const decision = data.guardResult?.finalDecision;
+          if (data.guardResult?.passed !== true || (decision !== "POSSÍVEL COMPRA" && decision !== "POSSÍVEL VENDA")) return;
+          const delay = Number(data.latencyMs);
+          if (!Number.isFinite(delay) || delay > 15000) return;
+          const record: SignalRecord = {
+            id: crypto.randomUUID(),
+            timestamp: new Date(data.timestamp).toLocaleTimeString("pt-BR"),
+            asset: data.asset,
+            timeframe: data.timeframe,
+            expiration: data.expiration,
+            decision,
+            reason: data.guardResult?.guardReason || "Análise visual verificada",
+            guardPassed: true,
+            guardReason: data.guardResult?.guardReason || "",
+            latencyMs: delay,
+            result: "PENDENTE"
+          };
+          setSignalsHistory(prev => [record, ...prev.slice(0, 49)]);
+          setCurrentVisionResult(data.visionResult);
+          setCurrentGuardResult(data.guardResult);
+          setLastAnalysisTime(record.timestamp);
+          if (soundEnabled) playAlertSound(decision);
         }
       } catch (e) {
         console.error("WS message parse error:", e);
