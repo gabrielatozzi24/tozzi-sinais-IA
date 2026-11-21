@@ -1,0 +1,6 @@
+{
+  "name": "Tozzi Sinais IA",
+  "description": "Análise visual de gráficos OTC com robôs Vision Bot e Signal Guard para alertas educativos em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
