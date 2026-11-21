@@ -28,6 +28,7 @@ async function startServer() {
 
   // API endpoint for Tozzi Vision Bot & Signal Guard chart analysis
   app.post("/api/analyze-chart", async (req, res) => {
+    const requestStartedAt = Date.now();
     try {
       const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration } = req.body;
 
@@ -137,19 +138,27 @@ Analise minuciosamente a imagem fornecida do gráfico:
         };
       }
 
-      // Broadcast alert to all connected WebSocket clients (mobile viewers)
-      const broadcastPayload = JSON.stringify({
-        type: "NEW_SIGNAL",
-        timestamp: new Date().toISOString(),
-        asset: selectedAsset,
-        timeframe: selectedTimeframe,
-        expiration: selectedExpiration,
-        ...analysisData
-      });
-
-      for (const client of clients) {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(broadcastPayload);
+      // Broadcast only guarded, fresh signals; never broadcast AGUARDAR.
+      const check = analysisData.guardResult?.checks;
+      const elapsedMs = Date.now() - requestStartedAt;
+      const approved = analysisData.guardResult?.passed === true &&
+        check?.blurry === false && check?.incomplete === false &&
+        check?.assetMatch === true && check?.timeframeMatch === true &&
+        check?.contradictory === false && check?.contextOk === true &&
+        (analysisData.guardResult.finalDecision === "POSSÍVEL COMPRA" ||
+         analysisData.guardResult.finalDecision === "POSSÍVEL VENDA");
+      if (approved && elapsedMs <= 12000) {
+        const broadcastPayload = JSON.stringify({
+          type: "NEW_SIGNAL",
+          timestamp: new Date().toISOString(),
+          asset: selectedAsset,
+          timeframe: selectedTimeframe,
+          expiration: selectedExpiration,
+          latencyMs: elapsedMs,
+          ...analysisData
+        });
+        for (const client of clients) {
+          if (client.readyState === WebSocket.OPEN) client.send(broadcastPayload);
         }
       }
 
