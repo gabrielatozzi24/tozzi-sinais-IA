@@ -205,11 +205,11 @@ export default function App() {
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (!mediaStreamRef.current && ["PRE_ALERT", "CONFIRMED", "CANCELLED"].includes(data.type)) {
+        if (!mediaStreamRef.current && ["PRE_ALERT", "CONFIRMED", "CANCELLED", "UNVERIFIED"].includes(data.type)) {
           const direction = data.guardResult?.finalDecision;
           const targetEpoch = Number(data.targetEpoch);
           if (!Number.isFinite(targetEpoch)) return;
-          if (data.type !== "CANCELLED" && (data.guardResult?.passed !== true ||
+          if (data.type !== "CANCELLED" && data.type !== "UNVERIFIED" && (data.guardResult?.passed !== true ||
             (direction !== "POSSÍVEL COMPRA" && direction !== "POSSÍVEL VENDA"))) return;
           const active = candidateRef.current;
           if (data.type === "PRE_ALERT") {
@@ -220,15 +220,16 @@ export default function App() {
             setCandidateSafe(next);
             if (soundEnabled) playAlertSound(direction);
           } else if (active && active.targetEpoch === targetEpoch) {
-            const technicalFailure = data.type === "CANCELLED" &&
-              /atras|expir|relógio|servidor|latên|janela|erro|falha/i.test(data.guardResult?.guardReason || "");
-            const next: Candidate = { ...active,
-              status: data.type === "CANCELLED" ? (technicalFailure ? "UNVERIFIED" : "CANCELLED") : "CONFIRMED",
-              reason: data.type === "CANCELLED"
-                ? (technicalFailure ? "Não foi possível confirmar a tempo: " : "Mudança nas condições: ") + (data.guardResult?.guardReason || "Não entrar.")
-                : "Condições ainda alinhadas. Aguarde o horário previsto; sem garantia de acerto." };
+            const nextStatus: Candidate["status"] = data.type === "CANCELLED" ? "CANCELLED"
+              : data.type === "UNVERIFIED" ? "UNVERIFIED" : "CONFIRMED";
+            const next: Candidate = { ...active, status: nextStatus,
+              reason: nextStatus === "CANCELLED"
+                ? data.guardResult?.guardReason || "Conflito confirmado. Sinal cancelado."
+                : nextStatus === "UNVERIFIED"
+                  ? data.guardResult?.guardReason || "Sem reconfirmação. Não entrar."
+                  : "Condições reconfirmadas. Confira o gráfico antes do horário previsto." };
             setCandidateSafe(next);
-            if (soundEnabled) playAlertSound(data.type === "CANCELLED" ? "AGUARDAR" : direction);
+            if (soundEnabled) playAlertSound(data.type === "CONFIRMED" ? direction : "AGUARDAR");
             if (data.type === "CONFIRMED") {
               setSignalsHistory(prev => [{
                 id: crypto.randomUUID(), timestamp: new Date().toLocaleTimeString("pt-BR"), asset: next.asset,
@@ -249,24 +250,31 @@ export default function App() {
     };
   }, [soundEnabled, accessCode]);
 
-  // Audio beep
+  // Two clear, slightly louder beeps. Browser/system volume remains authoritative.
   const playAlertSound = (decision: string) => {
     try {
       const audioCtx = audioRef.current || new (window.AudioContext || (window as any).webkitAudioContext)();
       audioRef.current = audioCtx;
       void audioCtx.resume();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = decision === "POSSÍVEL COMPRA" ? "sine" : decision === "POSSÍVEL VENDA" ? "sawtooth" : "triangle";
-      osc.frequency.setValueAtTime(decision === "POSSÍVEL COMPRA" ? 880 : decision === "POSSÍVEL VENDA" ? 440 : 550, audioCtx.currentTime);
-      gain.gain.setValueAtTime(0.22, audioCtx.currentTime);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.6);
-    } catch (e) {
-      console.error("Audio error:", e);
-    }
+      const isBuy = decision === "POSSÍVEL COMPRA";
+      const isSell = decision === "POSSÍVEL VENDA";
+      const frequencies = isBuy ? [880, 1100] : isSell ? [560, 440] : [620, 450];
+      const start = audioCtx.currentTime + 0.02;
+      frequencies.forEach((frequency, index) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const at = start + index * 0.27;
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(frequency, at);
+        gain.gain.setValueAtTime(0.001, at);
+        gain.gain.linearRampToValueAtTime(0.38, at + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.001, at + 0.20);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(at);
+        osc.stop(at + 0.22);
+      });
+    } catch (error) { console.warn("Não foi possível reproduzir o alerta sonoro:", error); }
   };
 
   // Start Live Monitoring
@@ -466,12 +474,12 @@ export default function App() {
       } else {
         const previous = candidateRef.current;
         if (previous && previous.targetEpoch === targetEpoch) {
-          const technicalFailure = !allowed && (expired || clockMismatch || !windowOk);
-          const next: Candidate = { ...previous, status: allowed ? "CONFIRMED" : technicalFailure ? "UNVERIFIED" : "CANCELLED",
+          const next: Candidate = { ...previous, status: allowed ? "CONFIRMED" :
+              data.phaseEvent === "CANCELLED" ? "CANCELLED" : "UNVERIFIED",
             reason: allowed ? "Condições reconfirmadas. Entrada prevista: " + formatEntryTime(targetEpoch) +
               ". Confira novamente o gráfico antes de qualquer operação."
-              : technicalFailure ? "SEM CONFIRMAÇÃO (técnico/horário): " + reason
-              : "SINAL CANCELADO POR CONFLITO: " + reason };
+               : data.phaseEvent === "CANCELLED" ? "SINAL CANCELADO POR CONFLITO: " + reason
+              : "SEM CONFIRMAÇÃO: " + reason };
           setCandidateSafe(next);
           if (soundEnabled) playAlertSound(allowed ? direction : "AGUARDAR");
           if (allowed) {
@@ -615,7 +623,7 @@ export default function App() {
                candidate.status === "UNVERIFIED" ? "⚠️ SEM CONFIRMAÇÃO — NÃO ENTRAR" :
                candidate.status === "EXPIRED" ? "🕒 PRÉ-ALERTA EXPIRADO" : "⛔ CANCELADO POR CONFLITO"}
             </p>
-            <div className="text-sm text-slate-200">
+            <div className={`text-sm font-bold ${candidate.decision === "POSSÍVEL COMPRA" ? "text-green-400" : "text-red-400"}`}>
               {candidate.decision} • {candidate.asset} • {candidate.timeframe} / {candidate.expiration}
             </div>
             <div className="text-xl font-bold text-white">
@@ -1206,7 +1214,8 @@ export default function App() {
                 candidate.status === "UNVERIFIED" ? "⚠️ SEM CONFIRMAÇÃO — NÃO ENTRAR" :
                 candidate.status === "EXPIRED" ? "🕒 PRÉ-ALERTA EXPIRADO" : "⛔ CANCELADO POR CONFLITO"}
             </p>
-            <p className="mt-2 text-lg font-extrabold">{candidate.decision}</p>
+            <p className={`mt-2 rounded-lg border px-3 py-2 text-xl font-extrabold ${candidate.decision === "POSSÍVEL COMPRA" ?
+              "border-green-500/60 bg-green-500/20 text-green-300" : "border-red-500/60 bg-red-500/20 text-red-300"}`}>{candidate.decision}</p>
             <p className="text-xs">{candidate.asset} · {candidate.timeframe} · Exp. {candidate.expiration}</p>
             <p className="mt-2 text-base font-semibold">Entrada prevista: {formatEntryTime(candidate.targetEpoch)}</p>
             <p className="text-xs mt-1">{candidate.targetEpoch > nowEpoch
