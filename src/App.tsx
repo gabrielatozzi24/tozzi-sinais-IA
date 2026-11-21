@@ -445,7 +445,7 @@ export default function App() {
       if (!res.ok) {
         const details = await res.json().catch(() => ({}));
         if (res.status === 503 && details?.type === "GEMINI_UNAVAILABLE") {
-          const retrySeconds = Math.max(30, Math.min(180, Number(details.retryAfterSeconds) || 60));
+          const retrySeconds = Math.max(30, Math.min(300, Number(details.retryAfterSeconds) || 60));
           overloadUntilRef.current = Date.now() + retrySeconds * 1000;
           setOverloadUntil(overloadUntilRef.current);
           throw new Error(details.error || "Gemini sobrecarregado. Aguardando nova tentativa.");
@@ -927,7 +927,7 @@ export default function App() {
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                         currentGuardResult.passed ? "bg-green-500/20 text-green-400 border border-green-500/30" : "bg-red-500/20 text-red-400 border border-red-500/30"
                       }`}>
-                        {currentGuardResult.passed ? "APROVADO" : "BLOQUEADO"}
+                        {currentGuardResult.technicalError ? "IA INDISPONÍVEL" : currentGuardResult.passed ? "APROVADO" : "BLOQUEADO"}
                       </span>
                     )}
                   </div>
