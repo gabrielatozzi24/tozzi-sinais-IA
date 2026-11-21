@@ -25,6 +25,13 @@ async function startServer() {
   // Vite dev server integration
   // Connected WebSocket clients for real-time mobile alerts
   const clients = new Set<WebSocket>();
+  const getAccessCode = () => process.env.TOZZI_ACCESS_CODE || "";
+  app.use("/api", (req, res, next) => {
+    const expected = getAccessCode();
+    if (!expected) return res.status(503).json({ error: "Configure TOZZI_ACCESS_CODE no Render para proteger a API." });
+    if (req.header("X-Tozzi-Access") !== expected) return res.status(401).json({ error: "Código de acesso não autorizado." });
+    next();
+  });
 
   // API endpoint for Tozzi Vision Bot & Signal Guard chart analysis
   app.post("/api/analyze-chart", async (req, res) => {
@@ -189,7 +196,13 @@ Analise minuciosamente a imagem fornecida do gráfico:
 
   // Attach WebSocket server for real-time mobile updates
   const wss = new WebSocketServer({ server });
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
+    const expected = getAccessCode();
+    const protocols = String(req.headers["sec-websocket-protocol"] || "").split(",").map(v => v.trim());
+    if (!expected || protocols[1] !== expected) {
+      ws.close(1008, "Acesso não autorizado");
+      return;
+    }
     clients.add(ws);
     ws.send(JSON.stringify({ type: "WELCOME", message: "Conectado ao Tozzi Sinais IA (Modo Tempo Real)" }));
     ws.on("close", () => {
