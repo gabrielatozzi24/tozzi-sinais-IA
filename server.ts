@@ -68,9 +68,9 @@ Analise minuciosamente a imagem fornecida do gráfico:
 2. Identifique a tendência aparente, posição das velas recentes, EMA 21 (se visível), suportes e resistências, rejeições, rompimentos e zonas de indecisão.
 3. Aplique o rigor do Signal Guard: bloqueie sinais (retornando AGUARDAR) se a imagem estiver borrada, incompleta, ativo divergente, período indefinido, sinais contraditórios ou contexto insuficiente.
 4. NUNCA invente indicadores não visíveis nem preveja com certeza absoluta o próximo candle. Seja estritamente educativo e analítico.
-5. Na avaliação de COMPRA, exija confirmação de pressão compradora nas velas recentes; em VENDA, pressão vendedora. Se as velas recentes ou a vela atual estiverem visivelmente contra a proposta, ou se a direção não puder ser verificada, escolha AGUARDAR.
-6. Classifique a direção da vela atual e da última vela fechada EXCLUSIVAMENTE se estiverem nítidas na captura. Use ALTA, BAIXA ou INDEFINIDA.
-7. Se houver divergência entre candle atual, tendência, suporte/resistência e sinal proposto, marque contradictory=true, passed=false e AGUARDAR.
+5. Avalie a ESTRUTURA de mercado, e não apenas a cor isolada das velas: compra com estrutura de alta, venda com estrutura de baixa. Uma vela corretiva pequena contra a tendência NÃO bloqueia automaticamente a hipótese, desde que o movimento principal esteja claro e a correção seja visivelmente fraca.
+6. Classifique a vela atual e a última vela fechada conforme a captura em ALTA, BAIXA ou INDEFINIDA. Determine também se a estrutura suporta o lado proposto (trendSupportsDirection), e se a vela atual contrária representa claramente uma correção pequena sem força (minorCountertrendPullback). Não marque esses campos como true se não houver evidência visível.
+7. Se houver reversão convincente, pressão oposta forte, mercado lateral sem direção ou conflito relevante entre tendência, velas e resistência/suporte, marque contradictory=true, passed=false, AGUARDAR. NÃO inverta automaticamente COMPRA para VENDA por uma única vela vermelha, nem VENDA para COMPRA por uma única vela verde.
 8. Esta é uma hipótese educacional para uma futura entrada, não uma previsão confiável nem recomendação definitiva. Não há garantia de acerto.
 9. Retorne estritamente um JSON com a estrutura solicitada.
 `;
@@ -107,9 +107,11 @@ Analise minuciosamente a imagem fornecida do gráfico:
                   decision: { type: Type.STRING, description: "POSSÍVEL COMPRA, POSSÍVEL VENDA ou AGUARDAR" },
                   currentCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
                   lastClosedCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
+                  trendSupportsDirection: { type: Type.BOOLEAN, description: "Estrutura de tendência confirmada sustenta a direção proposta" },
+                  minorCountertrendPullback: { type: Type.BOOLEAN, description: "Vela atual contrária é apenas correção pequena e fraca, com evidência visual" },
                   reason: { type: Type.STRING }
                 },
-                required: ["assetDetected", "isOtc", "timeframeDetected", "trend", "decision", "reason", "currentCandleDirection", "lastClosedCandleDirection"]
+                required: ["assetDetected", "isOtc", "timeframeDetected", "trend", "decision", "reason", "currentCandleDirection", "lastClosedCandleDirection", "trendSupportsDirection", "minorCountertrendPullback"]
               },
               guardResult: {
                 type: Type.OBJECT,
@@ -167,9 +169,13 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const ch = guard.checks || {};
       const direction = guard.finalDecision;
       const expectedCandle = direction === "POSSÍVEL COMPRA" ? "ALTA" : direction === "POSSÍVEL VENDA" ? "BAIXA" : "";
-      const candleAligned = expectedCandle !== "" &&
-        vision.currentCandleDirection === expectedCandle &&
+      // Allow a clearly weak pullback instead of demanding two identical-color candles.
+      // An opposing candle without explicit structural confirmation remains blocked.
+      const mainCandleAligned = expectedCandle !== "" &&
         vision.lastClosedCandleDirection === expectedCandle;
+      const latestCandleOk = vision.currentCandleDirection === expectedCandle ||
+        (vision.minorCountertrendPullback === true && vision.trendSupportsDirection === true);
+      const candleAligned = mainCandleAligned && latestCandleOk && vision.trendSupportsDirection === true;
       const previousAligned = stage !== "CONFIRM" || priorDirection === direction;
       const visionAgrees = vision.decision === direction;
       const timeframeAligned = vision.timeframeDetected === selectedTimeframe;
@@ -185,7 +191,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
       if (!approved) {
         analysisData.guardResult = {
           ...guard, passed: false, finalDecision: "AGUARDAR",
-          guardReason: !candleAligned ? "Direção da vela atual e da última vela fechada não confirma o mesmo movimento. Sinal bloqueado."
+          guardReason: !candleAligned ? "Tendência, última vela fechada ou correção atual sem confirmação suficiente. Aguardando estrutura clara."
             : !previousAligned || !visionAgrees ? "Vision Bot e Signal Guard divergem ou a direção mudou. Sinal cancelado."
             : !withinWindow ? "Sinal expirado fora da janela programada."
             : !assetAligned || !timeframeAligned ? "Ativo ou período da captura não confirmado."
