@@ -191,6 +191,23 @@ export default function App() {
     }
   };
 
+  // Reattach the screen-sharing stream when returning to the monitoring tab.
+  // The video element is unmounted when another tab is selected.
+  useEffect(() => {
+    if (activeTab !== "monitor" || !isMonitoring || !mediaStreamRef.current || !videoRef.current) return;
+
+    const video = videoRef.current;
+    const stream = mediaStreamRef.current;
+    const track = stream.getVideoTracks()[0];
+    if (!track || track.readyState !== "live") {
+      stopMonitoring();
+      return;
+    }
+
+    if (video.srcObject !== stream) video.srcObject = stream;
+    video.play().catch((error) => console.warn("Screen preview playback failed:", error));
+  }, [activeTab, isMonitoring]);
+
   // Stop Monitoring
   const stopMonitoring = () => {
     if (mediaStreamRef.current) {
