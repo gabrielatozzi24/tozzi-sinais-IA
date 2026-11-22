@@ -48,7 +48,8 @@ async function startServer() {
   app.post("/api/analyze-chart", async (req, res) => {
     const requestStartedAt = Date.now();
     try {
-      const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp } = req.body;
+      const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp, optionMode } = req.body;
+      const marketMode = optionMode === "DIGITAL" ? "DIGITAL" : "BINARIA";
       if (Date.now() < geminiUnavailableUntil) {
         const retryAfterSeconds = Math.max(1, Math.ceil((geminiUnavailableUntil - Date.now()) / 1000));
         return res.status(503).set("Retry-After", String(retryAfterSeconds)).json({
@@ -82,7 +83,7 @@ async function startServer() {
 
       const systemPrompt = `
 Você é o "Tozzi Vision Bot" e o "Tozzi Signal Guard", robôs especialistas em análise visual de gráficos OTC (opções binárias / Safirion).
-O usuário selecionou o ativo: "${selectedAsset || "EUR/USD OTC"}" no período: "${selectedTimeframe || "M1"}" com expiração de: "${selectedExpiration || "1min"}".
+O usuário selecionou o ativo: "${selectedAsset || "EUR/USD OTC"}", tipo de opção "${marketMode === "DIGITAL" ? "Digital" : "Binária"}", no período: "${selectedTimeframe || "M1"}" com expiração de: "${selectedExpiration || "1min"}". A seleção é manual e NÃO garante que esse mercado esteja aberto ou que o tipo de opção seja verificável na captura.
 
 Analise minuciosamente a imagem fornecida do gráfico:
 1. Identifique o ativo exibido, se é OTC, se o período visível corresponde a M1 ou M5.
@@ -96,7 +97,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
 9. Retorne estritamente um JSON com a estrutura solicitada.
 `;
 
-      const prompt = `Analise a captura OTC. Ativo: ${selectedAsset}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
+      const prompt = `Analise a captura OTC. Ativo: ${selectedAsset}. Tipo: ${marketMode}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
 
       const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
       const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
@@ -267,7 +268,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
           type: phaseEvent,
           timestamp: new Date().toISOString(),
           targetEpoch: target,
-          asset: selectedAsset, timeframe: selectedTimeframe, expiration: selectedExpiration,
+          asset: selectedAsset, timeframe: selectedTimeframe, expiration: selectedExpiration, optionMode: marketMode,
           latencyMs: Date.now() - requestStartedAt,
           bots: {
             timing: { ...timing, name: "Tozzi Timing Bot" },
@@ -283,6 +284,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         vision: { name: "Tozzi Vision Bot", decision: vision.decision },
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
+      analysisData.optionMode = marketMode;
       analysisData.phase = stage;
       analysisData.phaseEvent = phaseEvent;
       analysisData.targetEpoch = target;
