@@ -241,7 +241,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
       });
       const trend = trendBot(vision, direction);
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
-        ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true &&
+        assetAligned && timeframeAligned && ch.contradictory === false && ch.contextOk === true &&
         candleAligned && previousAligned && visionAgrees && timeframeAligned && assetAligned && withinWindow &&
         trend.passed && timing.passed && Date.now() - requestStartedAt <= 15000;
       if (!approved) {
