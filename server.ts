@@ -4,6 +4,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import { timingBot, trendBot } from "./bots.js";
+import { ApiUsageGate, classifyGeminiError } from "./apiUsage.js";
 
 dotenv.config();
 
@@ -22,14 +23,9 @@ const ai = new GoogleGenAI({
 
 const PORT = Number(process.env.PORT) || 3000;
 
-// Shared cooldown across browser sessions: avoid repeatedly hammering unavailable models.
-let geminiUnavailableUntil = 0;
+// Server-wide limit includes all connected browsers and model requests.
+const usageGate = new ApiUsageGate(8);
 let geminiOverloadStreak = 0;
-const isGeminiOverload = (error: any) => {
-  const raw = String(error?.message || error || "");
-  return Number(error?.status || error?.code) === 503 ||
-    /"code"\s*:\s*503|high demand|UNAVAILABLE|overloaded|temporarily unavailable/i.test(raw);
-};
 
 
 async function startServer() {
@@ -50,13 +46,6 @@ async function startServer() {
     try {
       const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp, optionMode } = req.body;
       const marketMode = optionMode === "DIGITAL" ? "DIGITAL" : "BINARIA";
-      if (Date.now() < geminiUnavailableUntil) {
-        const retryAfterSeconds = Math.max(1, Math.ceil((geminiUnavailableUntil - Date.now()) / 1000));
-        return res.status(503).set("Retry-After", String(retryAfterSeconds)).json({
-          error: "Os modelos de IA estão temporariamente indisponíveis. O app tentará novamente após a pausa.",
-          type: "GEMINI_UNAVAILABLE", retryAfterSeconds
-        });
-      }
       const stage = phase === "CONFIRM" ? "CONFIRM" : "PREPARE";
       const target = Number(targetEpoch);
       const remainingBefore = target - Date.now();
@@ -99,6 +88,17 @@ Analise minuciosamente a imagem fornecida do gráfico:
 
       const prompt = `Analise a captura OTC. Ativo: ${selectedAsset}. Tipo: ${marketMode}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
 
+      const admission = usageGate.acquire();
+      if (!admission.allowed) {
+        const quota = admission.reason === "LIMIT" || admission.reason === "PAUSE";
+        return res.status(quota ? 429 : 503).set("Retry-After", String(admission.retryAfterSeconds)).json({
+          error: quota ? "Economia de API ativa: aguarde antes da próxima análise."
+            : "Outra imagem já está sendo analisada. Aguarde a resposta.",
+          type: quota ? "API_RATE_LIMIT" : "ANALYSIS_BUSY",
+          retryAfterSeconds: admission.retryAfterSeconds,
+          usage: usageGate.stats()
+        });
+      }
       const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
       const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
       const generationRequest = {
@@ -165,16 +165,20 @@ Analise minuciosamente a imagem fornecida do gráfico:
       let response;
       let activeModel = primaryModel;
       try {
-        response = await ai.models.generateContent({ model: primaryModel, ...generationRequest });
-      } catch (primaryError: any) {
-        if (!isGeminiOverload(primaryError) || !backupModel || backupModel === primaryModel) throw primaryError;
-        console.warn("Gemini principal sobrecarregado; tentando modelo alternativo uma vez.");
-        activeModel = backupModel;
-        response = await ai.models.generateContent({ model: backupModel, ...generationRequest });
+        try {
+          response = await ai.models.generateContent({ model: primaryModel, ...generationRequest });
+        } catch (primaryError: any) {
+          // A quota error is project-wide: switching model immediately only wastes requests.
+          if (classifyGeminiError(primaryError) !== "OVERLOAD" ||
+              !backupModel || backupModel === primaryModel) throw primaryError;
+          // Backup is a single bounded attempt, not an endless retry.
+          activeModel = backupModel;
+          response = await ai.models.generateContent({ model: backupModel, ...generationRequest });
+        }
+      } finally {
+        usageGate.release();
       }
-      // A successful response from either model ends the outage circuit breaker.
       geminiOverloadStreak = 0;
-      geminiUnavailableUntil = 0;
       console.log("Chart analysis succeeded with model:", activeModel);
 
       const jsonText = response.text || "{}";
@@ -292,21 +296,29 @@ Analise minuciosamente a imagem fornecida do gráfico:
 
       res.json(analysisData);
     } catch (error: any) {
-      if (isGeminiOverload(error)) {
-        geminiOverloadStreak += 1;
-        const retryAfterSeconds = Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
-        geminiUnavailableUntil = Date.now() + retryAfterSeconds * 1000;
-        console.warn("Both Gemini routes unavailable. Cooldown seconds:", retryAfterSeconds);
-        return res.status(503).set("Retry-After", String(retryAfterSeconds)).json({
-          error: "Os modelos Gemini estão sobrecarregados. Nenhuma análise foi concluída. Pausa automática ativada.",
-          type: "GEMINI_UNAVAILABLE",
-          retryAfterSeconds
-        });
+      // Always release the gate, even if parsing or downstream validation fails.
+      usageGate.release();
+      const kind = classifyGeminiError(error);
+      if (kind === "QUOTA" || kind === "OVERLOAD") {
+        if (kind === "OVERLOAD") geminiOverloadStreak += 1;
+        const retryAfterSeconds = kind === "QUOTA"
+          ? 120 : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
+        usageGate.pause(retryAfterSeconds);
+        console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.");
+        return res.status(kind === "QUOTA" ? 429 : 503)
+          .set("Retry-After", String(retryAfterSeconds)).json({
+            error: kind === "QUOTA"
+              ? "Limite de consultas do Gemini atingido (429). Aguardando liberação da cota."
+              : "Gemini temporariamente sobrecarregado (503). Pausa automática ativada.",
+            type: kind === "QUOTA" ? "GEMINI_QUOTA" : "GEMINI_UNAVAILABLE",
+            retryAfterSeconds
+          });
       }
       console.error("Error analyzing chart:", error);
-      res.status(500).json({
-        error: "Falha técnica ao processar análise; nenhum sinal foi validado.",
-        type: "ANALYSIS_ERROR"
+      res.status(kind === "AUTH" ? 503 : 500).json({
+        error: kind === "AUTH" ? "Acesso à API Gemini não autorizado. Verifique a configuração da chave."
+          : "Falha técnica ao processar análise; nenhum sinal foi validado.",
+        type: kind === "AUTH" ? "GEMINI_AUTH" : "ANALYSIS_ERROR"
       });
     }
   });
