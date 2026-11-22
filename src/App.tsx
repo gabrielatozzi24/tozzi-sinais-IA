@@ -677,7 +677,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white">
+    <div className="min-h-screen bg-[#080a12] text-slate-100 flex flex-col font-sans selection:bg-orange-500/30 selection:text-white">
       {/* Hidden canvas for sampling */}
       <canvas ref={canvasRef} className="hidden" />
       {/* Stable capture decoder: never unmount it when switching navigation tabs. */}
@@ -685,16 +685,16 @@ export default function App() {
 
 
       {/* Header */}
-      <header className="bg-[#121620] border-b border-purple-900/30 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-lg shadow-purple-950/20">
+      <header className="bg-[#0d101c]/95 backdrop-blur-xl border-b border-white/10 px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-xl shadow-black/40">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-orange-500 flex items-center justify-center shadow-md shadow-purple-500/30 border border-purple-400/30">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-600 via-purple-600 to-orange-500 flex items-center justify-center shadow-lg shadow-orange-600/20 border border-white/20">
             <Zap className="w-5 h-5 text-white animate-pulse" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-wider bg-gradient-to-r from-white via-purple-200 to-orange-400 bg-clip-text text-transparent">
-              TOZZI SINAIS IA
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight bg-gradient-to-r from-white via-purple-200 to-orange-400 bg-clip-text text-transparent">
+              TOZZI SINAIS <span className="text-orange-400">IA PRO</span>
             </h1>
-            <p className="text-xs text-slate-400">Monitoramento M1 prioritário • 5 robôs de verificação</p>
+            <p className="text-xs text-slate-400">CENTRAL DE INTELIGÊNCIA • M1 / M5</p>
           </div>
         </div>
 
@@ -730,7 +730,7 @@ export default function App() {
         </div>
       </header>
 
-      <section className="bg-[#121620] px-4 py-2 border-b border-orange-500/20 flex items-center justify-between gap-3">
+      <section className="bg-[#0d101c] px-4 sm:px-8 py-2.5 border-b border-orange-500/15 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs text-emerald-300"><ShieldCheck className="h-4 w-4" /> Sessão autorizada • Monitoramento M1 / M5</div>
         <button type="button" onClick={() => {
           stopMonitoring();
@@ -740,10 +740,10 @@ export default function App() {
         }} className="rounded-lg border border-orange-500/40 px-3 py-1.5 text-xs font-semibold text-orange-300 hover:bg-orange-900/20">Sair do app</button>
       </section>
 
-      <section className="mx-4 mt-3 rounded-xl border border-purple-500/40 bg-[#121620] p-4 space-y-2">
+      <section className="mx-4 sm:mx-8 mt-5 rounded-3xl border border-orange-400/30 bg-gradient-to-br from-[#211631] via-[#141827] to-[#201522] p-5 sm:p-7 shadow-2xl shadow-purple-950/30 space-y-3 relative overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-purple-200">ALERTA ANTECIPADO • TOZZI SINAIS IA</h2>
-          <span className="text-xs text-slate-400">5 robôs: Vision + Guard + Timing + Trend + Candle</span>
+          <h2 className="text-sm font-black tracking-wider text-orange-200">CENTRAL DE SINAIS • PRÓXIMA ENTRADA</h2>
+          <span className="text-xs text-slate-400">5 ROBÔS • ANÁLISE EM CAMADAS</span>
         </div>
         {candidate ? (
           <div className="space-y-2">
@@ -779,26 +779,26 @@ export default function App() {
         {browserNotifications === "unsupported" && <span className="ml-2 text-xs text-slate-400">Este navegador não oferece notificações nesta página.</span>}
       </section>
 
-      <section className="mx-4 mt-3 rounded-xl border border-purple-500/20 bg-[#121620] p-4">
-        <h3 className="text-sm font-semibold text-purple-200">Equipe de verificação — 5 robôs</h3>
+      <section className="mx-4 sm:mx-8 mt-4 rounded-3xl border border-white/10 bg-[#111624] p-5 shadow-xl shadow-black/20">
+        <h3 className="text-sm font-semibold text-purple-200">EQUIPE DE ANÁLISE • 5 VERIFICADORES</h3>
         <p className="mt-1 text-xs text-slate-400">Timing Bot valida o horário; Trend e Candle revisam tendência e velas. Os três reaproveitam a mesma análise visual, sem chamadas extras.</p>
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Vision Bot</strong><p className="text-slate-400 mt-1">Leitura do gráfico</p></div>
-          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Signal Guard</strong><p className="text-slate-400 mt-1">Filtro final</p></div>
-          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Timing Bot</strong><p className={extraBots?.timing?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+          <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Vision Bot</strong><p className="text-slate-400 mt-1">Leitura do gráfico</p></div>
+          <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Signal Guard</strong><p className="text-slate-400 mt-1">Filtro final</p></div>
+          <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Timing Bot</strong><p className={extraBots?.timing?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
             {extraBots?.timing?.reason || "Aguardando análise"}
           </p></div>
-          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Trend Bot</strong><p className={extraBots?.trend?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
+          <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Trend Bot</strong><p className={extraBots?.trend?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
             {extraBots?.trend?.reason || "Aguardando análise"}
           </p></div>
-          <div className="rounded-lg border border-orange-500/25 bg-orange-950/15 p-3 text-slate-200"><strong className="text-orange-200">Candle Bot</strong><p className={extraBots?.candles?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
+          <div className="rounded-2xl border border-orange-500/30 bg-gradient-to-br from-orange-900/20 to-[#191e2e] p-4 text-slate-200"><strong className="text-orange-200">Candle Bot</strong><p className={extraBots?.candles?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
             {extraBots?.candles?.reason || "Aguardando análise"}
           </p></div>
         </div>
       </section>
 
       {/* Navigation Tabs */}
-      <div className="bg-[#121620]/80 backdrop-blur border-b border-slate-800/80 px-4 flex space-x-2 overflow-x-auto">
+      <div className="bg-[#0d101c]/90 backdrop-blur-xl border-y border-white/10 px-4 sm:px-8 mt-5 flex gap-2 overflow-x-auto">
         {[
           { id: "monitor", label: "Monitoramento ao Vivo", icon: Activity },
           { id: "alerts", label: "Painel de Alertas", icon: ShieldAlert },
@@ -813,7 +813,7 @@ export default function App() {
               onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center space-x-2 py-3 px-4 border-b-2 font-medium text-sm transition-all whitespace-nowrap ${
                 isActive
-                  ? "border-purple-500 text-purple-400 bg-purple-500/10"
+                  ? "border-orange-400 text-orange-200 bg-orange-500/10"
                   : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
               }`}
             >
@@ -825,15 +825,51 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-4 md:p-6 max-w-7xl mx-auto w-full space-y-6">
+      <main className="flex-1 p-4 md:p-8 max-w-[1440px] mx-auto w-full space-y-6">
+        <section className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+          <div className="rounded-2xl border border-purple-400/20 bg-gradient-to-br from-[#201932] to-[#121625] p-4 sm:p-5 shadow-lg shadow-black/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-purple-200/80">Status do sistema</span>
+              <Activity className="h-4 w-4 text-purple-300" />
+            </div>
+            <p className={`mt-3 text-lg sm:text-xl font-extrabold ${isMonitoring && !isPaused ? "text-emerald-300" : isPaused ? "text-amber-300" : "text-white"}`}>
+              {isMonitoring ? isPaused ? "Em pausa" : "Monitorando" : "Aguardando"}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-400">{optionMode === "DIGITAL" ? "Digital" : "Binária"} • {selectedTimeframe} • {customAsset || selectedAsset}</p>
+          </div>
+          <div className="rounded-2xl border border-orange-400/25 bg-gradient-to-br from-[#272033] to-[#121625] p-4 sm:p-5 shadow-lg shadow-black/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-orange-200/80">Sinais confirmados</span>
+              <ShieldCheck className="h-4 w-4 text-orange-300" />
+            </div>
+            <p className="mt-3 text-2xl sm:text-3xl font-extrabold text-white tabular-nums">{historyStats.confirmed}</p>
+            <p className="mt-1 text-[11px] text-slate-400">Registros deste navegador</p>
+          </div>
+          <div className="rounded-2xl border border-amber-400/15 bg-[#141927] p-4 sm:p-5 shadow-lg shadow-black/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">Sem confirmação</span>
+              <ShieldAlert className="h-4 w-4 text-amber-300" />
+            </div>
+            <p className="mt-3 text-2xl sm:text-3xl font-extrabold text-white tabular-nums">{historyStats.unconfirmed}</p>
+            <p className="mt-1 text-[11px] text-slate-400">Não considerados operações</p>
+          </div>
+          <div className="rounded-2xl border border-purple-400/15 bg-[#141927] p-4 sm:p-5 shadow-lg shadow-black/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-slate-400">Taxa WIN informada</span>
+              <TrendingUp className="h-4 w-4 text-purple-300" />
+            </div>
+            <p className="mt-3 text-2xl sm:text-3xl font-extrabold text-white tabular-nums">{winRate === null ? "—" : winRate + "%"}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{historyStats.rated} operações marcadas manualmente</p>
+          </div>
+        </section>
         {activeTab === "monitor" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 lg:gap-6">
             {/* Left Column: Configuration & Live Controls */}
-            <div className="lg:col-span-1 space-y-6">
-              <div className="bg-[#121620] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+            <div className="xl:col-span-4 space-y-5">
+              <div className="bg-[#111624] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl shadow-black/25 space-y-4">
                 <h2 className="text-sm font-semibold text-purple-400 uppercase tracking-wider flex items-center space-x-2">
                   <Settings className="w-4 h-4" />
-                  <span>Configuração & Economia</span>
+                  <span>CONFIGURAÇÃO DE OPERAÇÃO</span>
                 </h2>
 
                 <div className="space-y-3">
@@ -944,7 +980,7 @@ export default function App() {
                   {!isMonitoring ? (
                     <button
                       onClick={startMonitoring}
-                      className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-purple-600/30 flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                      className="w-full bg-gradient-to-r from-violet-600 to-orange-500 hover:from-violet-500 hover:to-orange-400 text-white font-bold py-3 px-4 rounded-2xl shadow-lg shadow-orange-600/20 flex items-center justify-center space-x-2 transition-all cursor-pointer"
                     >
                       <Play className="w-4 h-4 fill-white" />
                       <span>INICIAR MONITORAMENTO AO VIVO</span>
@@ -986,13 +1022,13 @@ export default function App() {
             </div>
 
             {/* Right Column: Live Stream Video Preview & Dual Robots Status */}
-            <div className="lg:col-span-2 space-y-6">
+            <div className="xl:col-span-8 space-y-5">
               {/* Live Video Preview Card */}
-              <div className="bg-[#121620] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+              <div className="bg-[#111624] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl shadow-black/25 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center space-x-2">
                     <div className={`w-3 h-3 rounded-full ${isMonitoring && !isPaused ? "bg-green-500 animate-ping" : "bg-slate-600"}`} />
-                    <h2 className="text-sm font-semibold text-slate-200">Prévia de Vídeo ao Vivo (Safirion)</h2>
+                    <h2 className="text-sm font-semibold text-slate-200">GRÁFICO MONITORADO • SAFIRION</h2>
                   </div>
                   <div className="text-xs text-slate-400 flex items-center space-x-3 flex-wrap">
                     <span>{lastCaptureTime ? `Captura: ${lastCaptureTime}` : "Aguardando..."}</span>
@@ -1001,7 +1037,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="relative aspect-video bg-[#080a0e] rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center">
+                <div className="relative aspect-video bg-[#070a11] rounded-2xl border border-white/10 overflow-hidden flex items-center justify-center">
                   <video
                     ref={previewRef}
                     autoPlay
@@ -1030,7 +1066,7 @@ export default function App() {
               {/* Dual Robots Status Grid (Vision Bot & Signal Guard) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Tozzi Vision Bot */}
-                <div className="bg-[#121620] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3">
+                <div className="bg-[#111624] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl shadow-black/25 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2">
                       <div className="w-8 h-8 rounded-lg bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
@@ -1068,7 +1104,7 @@ export default function App() {
                 </div>
 
                 {/* Tozzi Signal Guard */}
-                <div className="bg-[#121620] border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-3">
+                <div className="bg-[#111624] border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl shadow-black/25 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <div className="flex items-center space-x-2">
                       <div className="w-8 h-8 rounded-lg bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
