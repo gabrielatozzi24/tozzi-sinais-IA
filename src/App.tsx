@@ -642,6 +642,40 @@ export default function App() {
     a.click(); URL.revokeObjectURL(url);
   };
 
+  if (!authenticated) return (
+    <main className="min-h-screen bg-[#080a11] text-white flex items-center justify-center p-5 font-sans relative overflow-hidden">
+      <div className="absolute top-[-100px] right-[-80px] h-[320px] w-[320px] rounded-full bg-purple-700/25 blur-[90px] pointer-events-none" />
+      <div className="absolute bottom-[-110px] left-[-100px] h-[340px] w-[340px] rounded-full bg-orange-600/20 blur-[90px] pointer-events-none" />
+      <form onSubmit={submitLogin} className="relative z-10 w-full max-w-md rounded-3xl border border-purple-500/30 bg-[#121522]/95 p-7 sm:p-9 shadow-2xl shadow-purple-950/40 space-y-6">
+        <div className="flex items-center gap-3">
+          <div className="rounded-2xl bg-gradient-to-br from-purple-600 to-orange-500 p-3 shadow-lg shadow-orange-500/20"><ShieldCheck className="h-7 w-7 text-white" /></div>
+          <div>
+            <h1 className="text-xl font-extrabold tracking-wide">TOZZI SINAIS IA <span className="text-orange-400">PRO</span></h1>
+            <p className="text-xs text-purple-200/75">Painel privado • 5 verificadores de sinais</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold">Acesso protegido</h2>
+          <p className="text-sm text-slate-400">Digite o mesmo código privado que você configurou em TOZZI_ACCESS_CODE no Render.</p>
+        </div>
+        <div className="space-y-2">
+          <label htmlFor="private-password" className="block text-sm font-semibold text-orange-200">Sua senha de acesso</label>
+          <input id="private-password" type="password" autoComplete="current-password" required
+            value={passwordEntry} onChange={event => setPasswordEntry(event.target.value.trim())}
+            placeholder="Digite seu código privado"
+            className="w-full rounded-xl border border-slate-600 bg-[#0b0e17] px-4 py-3 text-base text-white outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-400/20" />
+          <p className="text-[11px] text-slate-500">Sua senha não será exibida nem armazenada permanentemente neste navegador.</p>
+        </div>
+        {loginError && <p role="alert" className="rounded-lg border border-red-500/40 bg-red-950/40 p-3 text-sm text-red-200">{loginError}</p>}
+        <button type="submit" disabled={loginBusy}
+          className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 p-3.5 text-base font-bold text-white shadow-lg shadow-orange-950/30 hover:brightness-110 disabled:opacity-50">
+          {loginBusy ? "Conferindo senha..." : "Confirmar e entrar"}
+        </button>
+        <p className="text-center text-xs text-slate-500">O aplicativo não envia ordens para a corretora. Use a conta demo para validar os sinais.</p>
+      </form>
+    </main>
+  );
+
   return (
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white">
       {/* Hidden canvas for sampling */}
@@ -653,14 +687,14 @@ export default function App() {
       {/* Header */}
       <header className="bg-[#121620] border-b border-purple-900/30 px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-lg shadow-purple-950/20">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center shadow-md shadow-purple-500/30 border border-purple-400/30">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-orange-500 flex items-center justify-center shadow-md shadow-purple-500/30 border border-purple-400/30">
             <Zap className="w-5 h-5 text-white animate-pulse" />
           </div>
           <div>
-            <h1 className="text-lg font-bold tracking-wider bg-gradient-to-r from-white via-purple-200 to-purple-400 bg-clip-text text-transparent">
+            <h1 className="text-lg font-bold tracking-wider bg-gradient-to-r from-white via-purple-200 to-orange-400 bg-clip-text text-transparent">
               TOZZI SINAIS IA
             </h1>
-            <p className="text-xs text-slate-400">Monitoramento Visual Contínuo • Vision Bot & Signal Guard</p>
+            <p className="text-xs text-slate-400">Monitoramento M1 prioritário • 5 robôs de verificação</p>
           </div>
         </div>
 
@@ -696,18 +730,20 @@ export default function App() {
         </div>
       </header>
 
-      <section className="bg-[#121620] px-4 py-2 border-b border-slate-800 flex flex-wrap items-center gap-3">
-        <label className="text-xs text-purple-200" htmlFor="tozzi-access">Código privado (mesmo no notebook e no celular)</label>
-        <input id="tozzi-access" type="password" autoComplete="off" value={accessCode}
-          onChange={e => setAccessCode(e.target.value.trim())}
-          placeholder="Código configurado no Render" className="min-w-[210px] rounded-md bg-slate-900 text-white border border-slate-600 px-3 py-2 text-sm" />
-        {!accessCode && <span className="text-xs text-amber-300">Configure TOZZI_ACCESS_CODE no Render antes de analisar ou receber sinais.</span>}
+      <section className="bg-[#121620] px-4 py-2 border-b border-orange-500/20 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-emerald-300"><ShieldCheck className="h-4 w-4" /> Sessão autorizada • Monitoramento M1 / M5</div>
+        <button type="button" onClick={() => {
+          stopMonitoring();
+          setAccessCode("");
+          setAuthenticated(false);
+          setPasswordEntry("");
+        }} className="rounded-lg border border-orange-500/40 px-3 py-1.5 text-xs font-semibold text-orange-300 hover:bg-orange-900/20">Sair do app</button>
       </section>
 
       <section className="mx-4 mt-3 rounded-xl border border-purple-500/40 bg-[#121620] p-4 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-purple-200">ALERTA ANTECIPADO • TOZZI SINAIS IA</h2>
-          <span className="text-xs text-slate-400">4 robôs: Vision + Signal Guard + Timing + Trend</span>
+          <span className="text-xs text-slate-400">5 robôs: Vision + Guard + Timing + Trend + Candle</span>
         </div>
         {candidate ? (
           <div className="space-y-2">
@@ -744,9 +780,9 @@ export default function App() {
       </section>
 
       <section className="mx-4 mt-3 rounded-xl border border-purple-500/20 bg-[#121620] p-4">
-        <h3 className="text-sm font-semibold text-purple-200">Equipe de verificação — 4 robôs</h3>
-        <p className="mt-1 text-xs text-slate-400">Timing Bot confere vela e atraso; Trend Bot confere a estrutura visual interpretada pela IA. Não geram novas chamadas à API.</p>
-        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <h3 className="text-sm font-semibold text-purple-200">Equipe de verificação — 5 robôs</h3>
+        <p className="mt-1 text-xs text-slate-400">Timing Bot valida o horário; Trend e Candle revisam tendência e velas. Os três reaproveitam a mesma análise visual, sem chamadas extras.</p>
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
           <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Vision Bot</strong><p className="text-slate-400 mt-1">Leitura do gráfico</p></div>
           <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Signal Guard</strong><p className="text-slate-400 mt-1">Filtro final</p></div>
           <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Timing Bot</strong><p className={extraBots?.timing?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
@@ -754,6 +790,9 @@ export default function App() {
           </p></div>
           <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Trend Bot</strong><p className={extraBots?.trend?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
             {extraBots?.trend?.reason || "Aguardando análise"}
+          </p></div>
+          <div className="rounded-lg border border-orange-500/25 bg-orange-950/15 p-3 text-slate-200"><strong className="text-orange-200">Candle Bot</strong><p className={extraBots?.candles?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
+            {extraBots?.candles?.reason || "Aguardando análise"}
           </p></div>
         </div>
       </section>
@@ -1369,7 +1408,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-[#121620] border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500">
-        Tozzi Sinais IA • Monitoramento Contínuo com Vision Bot e Signal Guard.
+        Tozzi Sinais IA PRO • Cinco verificadores • Resultados registrados manualmente • Sem execução de operações.
       </footer>
     </div>
   );
