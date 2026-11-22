@@ -30,6 +30,17 @@ export class ApiUsageGate {
     this.attempts.push(now);
     return { allowed: true, retryAfterSeconds: 0 };
   }
+  // A fallback model uses a second network request and must count against the same budget.
+  consumeFallback(now = Date.now()): { allowed: boolean; retryAfterSeconds: number } {
+    this.attempts = this.attempts.filter(at => now - at < 60_000);
+    if (!this.busy || this.attempts.length >= this.maxAttemptsPerMinute || now < this.waitUntil) {
+      const wait = this.attempts.length >= this.maxAttemptsPerMinute
+        ? this.attempts[0] + 60_000 - now : this.waitUntil - now;
+      return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil(wait / 1000)) };
+    }
+    this.attempts.push(now);
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
   release(): void { this.busy = false; }
   pause(seconds: number, now = Date.now()): void {
     const safeSeconds = Number.isFinite(seconds) ? Math.min(1800, Math.max(30, Math.ceil(seconds))) : 90;
