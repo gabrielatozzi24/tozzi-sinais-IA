@@ -1,6 +1,7 @@
 export type SignalStatus = "PRE_ALERT" | "CONFIRMED" | "UNVERIFIED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "AGUARDAR";
 export type SignalDirection = "POSSÍVEL COMPRA" | "POSSÍVEL VENDA" | "AGUARDAR";
 export type SignalOutcome = "WIN" | "LOSS" | "PENDENTE";
+export type SignalAction = "TAKEN" | "IGNORED";
 
 export interface SignalRecord {
   id: string;
@@ -19,6 +20,8 @@ export interface SignalRecord {
   latencyMs: number;
   status: SignalStatus;
   result?: SignalOutcome;
+  tradeAction?: SignalAction; // undefined = ainda não classificado; WIN/LOSS antigos implicam operação registrada
+  confirmedReason?: string; // conserva o motivo real ao encerrar a janela
   stages?: { status: SignalStatus; at: string; reason: string }[];
 }
 
@@ -42,7 +45,10 @@ export function upsertSignal(history: SignalRecord[], incoming: SignalRecord, ma
     [...(old.stages || []), { status: incoming.status, at: incoming.updatedAt, reason: incoming.reason }].slice(-12);
   const updated: SignalRecord = {
     ...old, ...incoming, id: old.id, timestamp: old.timestamp,
-    result: old.result || incoming.result, stages,
+    result: old.result === "WIN" || old.result === "LOSS" ? old.result : incoming.result,
+    tradeAction: old.tradeAction ?? incoming.tradeAction,
+    confirmedReason: incoming.status === "CONFIRMED" ? incoming.reason : old.confirmedReason,
+    stages,
     // A confirmed signal must not become "unconfirmed" merely due to an old message.
     status: old.status === "CLOSED" && incoming.status === "PRE_ALERT" ? old.status : incoming.status
   };
@@ -53,17 +59,32 @@ export function isConfirmed(s: SignalRecord): boolean {
   return s.status === "CONFIRMED" || s.status === "CLOSED";
 }
 
+export type HistoryGroup = "CONFIRMED" | "UNCONFIRMED";
+export function historyGroup(s: SignalRecord): HistoryGroup {
+  return isConfirmed(s) ? "CONFIRMED" : "UNCONFIRMED";
+}
+export function wasTaken(s: SignalRecord): boolean {
+  return isConfirmed(s) && s.tradeAction !== "IGNORED" &&
+    (s.tradeAction === "TAKEN" || s.result === "WIN" || s.result === "LOSS");
+}
+export function canRecordOutcome(s: SignalRecord): boolean {
+  return isConfirmed(s) && s.decision !== "AGUARDAR" && wasTaken(s);
+}
+
 export function summarizeSignals(items: SignalRecord[]) {
   const confirmed = items.filter(isConfirmed);
   const unconfirmed = items.filter(s => ["UNVERIFIED", "EXPIRED", "AGUARDAR"].includes(s.status));
   const cancelled = items.filter(s => s.status === "CANCELLED");
-  const rated = confirmed.filter(s => s.result === "WIN" || s.result === "LOSS");
+  const rated = confirmed.filter(s => canRecordOutcome(s) && (s.result === "WIN" || s.result === "LOSS"));
   const wins = rated.filter(s => s.result === "WIN").length;
   return {
     total: items.length,
     confirmed: confirmed.length,
     unconfirmed: unconfirmed.length,
     cancelled: cancelled.length,
+    taken: confirmed.filter(wasTaken).length,
+    ignored: confirmed.filter(s => s.tradeAction === "IGNORED").length,
+    awaitingChoice: confirmed.filter(s => !wasTaken(s) && s.tradeAction !== "IGNORED").length,
     rated: rated.length,
     wins,
     losses: rated.length - wins,
