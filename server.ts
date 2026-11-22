@@ -4,6 +4,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import { timingBot, trendBot } from "./bots.js";
+import { checkAsset, checkTimeframe } from "./marketIdentity.js";
 import { ApiUsageGate, classifyGeminiError } from "./apiUsage.js";
 
 dotenv.config();
@@ -225,8 +226,10 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const candleAligned = mainCandleAligned && latestCandleOk && vision.trendSupportsDirection === true;
       const previousAligned = stage !== "CONFIRM" || priorDirection === direction;
       const visionAgrees = vision.decision === direction;
-      const timeframeAligned = vision.timeframeDetected === selectedTimeframe;
-      const assetAligned = String(vision.assetDetected || "").trim().toUpperCase() === String(selectedAsset || "").trim().toUpperCase();
+      const timeframeCheck = checkTimeframe(selectedTimeframe, vision.timeframeDetected);
+      const assetCheck = checkAsset(selectedAsset, vision.assetDetected);
+      const timeframeAligned = timeframeCheck.passed;
+      const assetAligned = assetCheck.passed;
       const remainingMs = target - Date.now();
       const withinWindow = stage === "PREPARE"
         ? remainingMs >= 30000 && remainingMs <= 60000
@@ -249,7 +252,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
             : !candleAligned ? "Tendência, última vela fechada ou correção atual sem confirmação suficiente. Aguardando estrutura clara."
             : !previousAligned || !visionAgrees ? "Vision Bot e Signal Guard divergem ou a direção mudou. Sinal cancelado."
             : !withinWindow ? "Sinal expirado fora da janela programada."
-            : !assetAligned || !timeframeAligned ? "Ativo ou período da captura não confirmado."
+            : !assetAligned ? "Identificação do ativo: " + assetCheck.reason + " Selecionado: " + assetCheck.expected + "; detectado: " + (assetCheck.detected || "ilegível") + "."
+            : !timeframeAligned ? "Identificação do período: " + timeframeCheck.reason + " Selecionado: " + timeframeCheck.expected + "; detectado: " + (timeframeCheck.detected || "ilegível") + "."
             : guard.guardReason || "Condições insuficientes para entrada."
         };
       }
@@ -295,6 +299,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
       analysisData.apiUsage = usageGate.stats();
+      analysisData.identity = { asset: assetCheck, timeframe: timeframeCheck };
       analysisData.optionMode = marketMode;
       analysisData.phase = stage;
       analysisData.phaseEvent = phaseEvent;
