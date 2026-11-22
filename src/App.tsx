@@ -91,6 +91,7 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [currentVisionResult, setCurrentVisionResult] = useState<any>(null);
   const [currentGuardResult, setCurrentGuardResult] = useState<any>(null);
+  const [extraBots, setExtraBots] = useState<any>(null);
   const [signalsHistory, setSignalsHistory] = useState<SignalRecord[]>([]);
 
   // Sound & Notifications
@@ -435,7 +436,7 @@ export default function App() {
         signal: controller.signal,
         body: JSON.stringify({
           imageBase64: dataUrl, selectedAsset: customAsset || selectedAsset,
-          selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection
+          selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp
         })
       });
       if (sessionId !== sessionRef.current || pauseRef.current || !mediaStreamRef.current) return;
@@ -469,6 +470,7 @@ export default function App() {
         : !windowOk ? "Fora da janela de aproximadamente 1 minuto para a próxima vela."
         : guard.guardReason || data.visionResult.reason || "Condição indefinida.";
       setCurrentVisionResult(data.visionResult);
+      setExtraBots(data.bots || null);
       setCurrentGuardResult({ ...guard, passed: allowed, finalDecision: allowed ? direction : "AGUARDAR", guardReason: reason });
       setAnalysisError(null);
       overloadUntilRef.current = 0;
@@ -507,6 +509,7 @@ export default function App() {
       const reason = err?.name === "AbortError" ? "Análise demorou mais de 17 segundos; descartada." : err?.message || "Erro de análise.";
       setAnalysisError(reason);
       setCurrentVisionResult(null); // No old analysis should look like a current recommendation.
+      setExtraBots(null);
       setCurrentGuardResult({ passed: false, technicalError: true, finalDecision: "AGUARDAR", guardReason: reason,
         checks: {} });
       if (phase === "CONFIRM") {
@@ -624,7 +627,7 @@ export default function App() {
       <section className="mx-4 mt-3 rounded-xl border border-purple-500/40 bg-[#121620] p-4 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-purple-200">ALERTA ANTECIPADO • TOZZI SINAIS IA</h2>
-          <span className="text-xs text-slate-400">2 robôs: Vision Bot + Signal Guard</span>
+          <span className="text-xs text-slate-400">4 robôs: Vision + Signal Guard + Timing + Trend</span>
         </div>
         {candidate ? (
           <div className="space-y-2">
@@ -658,6 +661,21 @@ export default function App() {
         </button>
         {browserNotifications === "denied" && <span className="ml-2 text-xs text-amber-300">Permissão bloqueada nas configurações do navegador.</span>}
         {browserNotifications === "unsupported" && <span className="ml-2 text-xs text-slate-400">Este navegador não oferece notificações nesta página.</span>}
+      </section>
+
+      <section className="mx-4 mt-3 rounded-xl border border-purple-500/20 bg-[#121620] p-4">
+        <h3 className="text-sm font-semibold text-purple-200">Equipe de verificação — 4 robôs</h3>
+        <p className="mt-1 text-xs text-slate-400">Timing Bot confere vela e atraso; Trend Bot confere a estrutura visual interpretada pela IA. Não geram novas chamadas à API.</p>
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Vision Bot</strong><p className="text-slate-400 mt-1">Leitura do gráfico</p></div>
+          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Signal Guard</strong><p className="text-slate-400 mt-1">Filtro final</p></div>
+          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Timing Bot</strong><p className={extraBots?.timing?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
+            {extraBots?.timing?.reason || "Aguardando análise"}
+          </p></div>
+          <div className="rounded-lg bg-slate-900 p-3 text-slate-200"><strong>Trend Bot</strong><p className={extraBots?.trend?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
+            {extraBots?.trend?.reason || "Aguardando análise"}
+          </p></div>
+        </div>
       </section>
 
       {/* Navigation Tabs */}
