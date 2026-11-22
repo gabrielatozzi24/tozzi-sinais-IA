@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
+import { timingBot, trendBot } from "./bots.js";
 
 dotenv.config();
 
@@ -47,7 +48,7 @@ async function startServer() {
   app.post("/api/analyze-chart", async (req, res) => {
     const requestStartedAt = Date.now();
     try {
-      const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection } = req.body;
+      const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp } = req.body;
       if (Date.now() < geminiUnavailableUntil) {
         const retryAfterSeconds = Math.max(1, Math.ceil((geminiUnavailableUntil - Date.now()) / 1000));
         return res.status(503).set("Retry-After", String(retryAfterSeconds)).json({
@@ -219,14 +220,22 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const withinWindow = stage === "PREPARE"
         ? remainingMs >= 30000 && remainingMs <= 60000
         : remainingMs >= 4000 && remainingMs <= 30000;
+      const timing = timingBot({
+        now: Date.now(), startedAt: requestStartedAt,
+        captureTimestamp: Number(captureTimestamp), target,
+        timeframe: selectedTimeframe, phase: stage
+      });
+      const trend = trendBot(vision, direction);
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
         ch.assetMatch === true && ch.timeframeMatch === true && ch.contradictory === false && ch.contextOk === true &&
         candleAligned && previousAligned && visionAgrees && timeframeAligned && assetAligned && withinWindow &&
-        Date.now() - requestStartedAt <= 15000;
+        trend.passed && timing.passed && Date.now() - requestStartedAt <= 15000;
       if (!approved) {
         analysisData.guardResult = {
           ...guard, passed: false, finalDecision: "AGUARDAR",
-          guardReason: !candleAligned ? "Tendência, última vela fechada ou correção atual sem confirmação suficiente. Aguardando estrutura clara."
+          guardReason: !timing.passed ? "Timing Bot: " + timing.reason
+            : !trend.passed ? "Trend Bot: " + trend.reason
+            : !candleAligned ? "Tendência, última vela fechada ou correção atual sem confirmação suficiente. Aguardando estrutura clara."
             : !previousAligned || !visionAgrees ? "Vision Bot e Signal Guard divergem ou a direção mudou. Sinal cancelado."
             : !withinWindow ? "Sinal expirado fora da janela programada."
             : !assetAligned || !timeframeAligned ? "Ativo ou período da captura não confirmado."
@@ -260,10 +269,20 @@ Analise minuciosamente a imagem fornecida do gráfico:
           targetEpoch: target,
           asset: selectedAsset, timeframe: selectedTimeframe, expiration: selectedExpiration,
           latencyMs: Date.now() - requestStartedAt,
+          bots: {
+            timing: { ...timing, name: "Tozzi Timing Bot" },
+            trend: { ...trend, name: "Tozzi Trend Bot" }
+          },
           ...analysisData
         });
         for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(broadcastPayload);
       }
+      analysisData.bots = {
+        timing: { ...timing, name: "Tozzi Timing Bot" },
+        trend: { ...trend, name: "Tozzi Trend Bot" },
+        vision: { name: "Tozzi Vision Bot", decision: vision.decision },
+        guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
+      };
       analysisData.phase = stage;
       analysisData.phaseEvent = phaseEvent;
       analysisData.targetEpoch = target;
