@@ -5,6 +5,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import { timingBot, trendBot } from "./bots.js";
+import { confirmationQuality } from "./confirmationQuality.js";
 import { candleBot } from "./candleBot.js";
 import { checkAsset, checkTimeframe } from "./marketIdentity.js";
 import { ApiUsageGate, classifyGeminiError } from "./apiUsage.js";
@@ -264,6 +265,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         timeframe: selectedTimeframe, phase: stage
       });
       const trend = trendBot(vision, direction);
+      const finalCandleQuality = confirmationQuality(stage, direction, vision);
       // The Guard may decline by setting finalDecision=AGUARDAR. In that case,
       // reviewing candles against AGUARDAR would produce a misleading generic
       // "no direction" message instead of exposing the actual rejection reason.
@@ -276,12 +278,14 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
         assetAligned && timeframeAligned && ch.contradictory === false && ch.contextOk === true &&
         candleAligned && previousAligned && visionAgrees && timeframeAligned && assetAligned && withinWindow &&
-        trend.passed && candles.passed && timing.passed && Date.now() - requestStartedAt <= 15000;
+        trend.passed && candles.passed && finalCandleQuality.passed &&
+        timing.passed && Date.now() - requestStartedAt <= 15000;
       if (!approved) {
         analysisData.guardResult = {
           ...guard, passed: false, finalDecision: "AGUARDAR",
           guardReason: !timing.passed ? "Timing Bot: " + timing.reason
             : guardDeclined ? "Signal Guard: " + (guard.guardReason || vision.reason || "Análise visual sem direção segura; aguardando nova captura.")
+            : !finalCandleQuality.passed ? "Reconfirmação de velas: " + finalCandleQuality.reason
             : !candles.passed ? "Candle Bot: " + candles.reason
             : !trend.passed ? "Trend Bot: " + trend.reason
             : !candleAligned ? "Tendência, última vela fechada ou correção atual sem confirmação suficiente. Aguardando estrutura clara."
@@ -322,7 +326,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
           bots: {
             timing: { ...timing, name: "Tozzi Timing Bot" },
             trend: { ...trend, name: "Tozzi Trend Bot" },
-            candles
+            candles,
+            finalCandleQuality
           },
           ...analysisData
         });
@@ -332,6 +337,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         timing: { ...timing, name: "Tozzi Timing Bot" },
         trend: { ...trend, name: "Tozzi Trend Bot" },
         candles,
+        finalCandleQuality,
         vision: { name: "Tozzi Vision Bot", decision: vision.decision },
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
