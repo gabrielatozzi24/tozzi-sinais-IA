@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import { timingBot, trendBot } from "./bots.js";
 import { confirmationQuality } from "./confirmationQuality.js";
+import { precisionCandleBot, reversalWatchBot } from "./advisoryCandleBots.js";
 import { candleBot } from "./candleBot.js";
 import { checkAsset, checkTimeframe } from "./marketIdentity.js";
 import { ApiUsageGate, classifyGeminiError } from "./apiUsage.js";
@@ -107,7 +108,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
 3. Aplique o rigor do Signal Guard: bloqueie sinais (retornando AGUARDAR) se a imagem estiver borrada, incompleta, ativo divergente, período indefinido, sinais contraditórios ou contexto insuficiente.
 4. NUNCA invente indicadores não visíveis nem preveja com certeza absoluta o próximo candle. Seja estritamente educativo e analítico.
 5. Avalie a ESTRUTURA de mercado, e não apenas a cor isolada das velas: compra com estrutura de alta, venda com estrutura de baixa. Uma vela corretiva pequena contra a tendência NÃO bloqueia automaticamente a hipótese, desde que o movimento principal esteja claro e a correção seja visivelmente fraca.
-6. Classifique a vela atual e a última vela fechada conforme a captura em ALTA, BAIXA ou INDEFINIDA. Determine também se a estrutura suporta o lado proposto (trendSupportsDirection), e se a vela atual contrária representa claramente uma correção pequena sem força (minorCountertrendPullback). Não marque esses campos como true se não houver evidência visível.
+6. Classifique a vela atual e a última vela fechada conforme a captura em ALTA, BAIXA ou INDEFINIDA. Determine também se a estrutura suporta o lado proposto (trendSupportsDirection), e se a vela atual contrária representa claramente uma correção pequena sem força (minorCountertrendPullback). Não marque esses campos como true se não houver evidência visível.\n6a. Para diagnósticos EM OBSERVAÇÃO apenas, avalie especificamente: força do corpo da vela atual (candleBodyStrength: FORTE, MODERADO, FRACO ou INDEFINIDO), pressão de pavios contra a direção proposta (opposingWickPressure: FORTE, MODERADA, FRACA ou INDEFINIDA), evidência de reversão (reversalEvidence: FORTE, MODERADA, AUSENTE ou INDEFINIDA), continuação da estrutura (structureContinuation: SIM, NAO ou INDEFINIDA). Não invente medições nem confunda uma vela aberta com fechada; quando invisível, marque INDEFINIDO ou INDEFINIDA. Estes diagnósticos NÃO aprovam nem bloqueiam operações.
 7. Se houver reversão convincente, pressão oposta forte, mercado lateral sem direção ou conflito relevante entre tendência, velas e resistência/suporte, marque contradictory=true, passed=false, AGUARDAR. NÃO inverta automaticamente COMPRA para VENDA por uma única vela vermelha, nem VENDA para COMPRA por uma única vela verde.
 8. Esta é uma hipótese educacional para uma futura entrada, não uma previsão confiável nem recomendação definitiva. Não há garantia de acerto.
 9. Retorne estritamente um JSON com a estrutura solicitada.
@@ -159,6 +160,10 @@ Analise minuciosamente a imagem fornecida do gráfico:
                   lastClosedCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
                   trendSupportsDirection: { type: Type.BOOLEAN, description: "Estrutura de tendência confirmada sustenta a direção proposta" },
                   minorCountertrendPullback: { type: Type.BOOLEAN, description: "Vela atual contrária é apenas correção pequena e fraca, com evidência visual" },
+                  candleBodyStrength: { type: Type.STRING, enum: ["FORTE","MODERADO","FRACO","INDEFINIDO"], description: "Força do corpo da vela atual visível; INDEFINIDO se não há evidência" },
+                  opposingWickPressure: { type: Type.STRING, enum: ["FORTE","MODERADA","FRACA","INDEFINIDA"], description: "Pressão de pavios CONTRÁRIOS à direção proposta; INDEFINIDA se não verificável" },
+                  reversalEvidence: { type: Type.STRING, enum: ["FORTE","MODERADA","AUSENTE","INDEFINIDA"], description: "Evidência visual de reversão, não certeza preditiva" },
+                  structureContinuation: { type: Type.STRING, enum: ["SIM","NAO","INDEFINIDA"], description: "Estrutura favorece continuação da direção proposta segundo a captura" },
                   reason: { type: Type.STRING }
                 },
                 required: ["assetDetected", "isOtc", "timeframeDetected", "trend", "decision", "reason", "currentCandleDirection", "lastClosedCandleDirection", "trendSupportsDirection", "minorCountertrendPullback"]
@@ -266,6 +271,10 @@ Analise minuciosamente a imagem fornecida do gráfico:
       });
       const trend = trendBot(vision, direction);
       const finalCandleQuality = confirmationQuality(stage, direction, vision);
+      // Advisory-only: no extra request, no modification to approval logic.
+      const advisoryDirection = direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA" ? direction : vision.decision;
+      const precisionCandle = precisionCandleBot(vision, advisoryDirection);
+      const reversalWatch = reversalWatchBot(vision, advisoryDirection);
       // The Guard may decline by setting finalDecision=AGUARDAR. In that case,
       // reviewing candles against AGUARDAR would produce a misleading generic
       // "no direction" message instead of exposing the actual rejection reason.
@@ -327,7 +336,9 @@ Analise minuciosamente a imagem fornecida do gráfico:
             timing: { ...timing, name: "Tozzi Timing Bot" },
             trend: { ...trend, name: "Tozzi Trend Bot" },
             candles,
-            finalCandleQuality
+            finalCandleQuality,
+            precisionCandle,
+            reversalWatch
           },
           ...analysisData
         });
@@ -338,6 +349,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
         trend: { ...trend, name: "Tozzi Trend Bot" },
         candles,
         finalCandleQuality,
+        precisionCandle,
+        reversalWatch,
         vision: { name: "Tozzi Vision Bot", decision: vision.decision },
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
