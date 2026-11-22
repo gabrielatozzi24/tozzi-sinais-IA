@@ -101,7 +101,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem("tozzi_signals_access", accessCode); }, [accessCode]);
 
   // Media stream refs
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null); // persistent capture decoder
+  const previewRef = useRef<HTMLVideoElement | null>(null); // visible preview, may unmount
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const monitoringLoopRef = useRef<any>(null);
@@ -300,7 +301,11 @@ export default function App() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        void videoRef.current.play().catch(e => console.warn("Capture decoder unavailable", e));
+      }
+      if (previewRef.current) {
+        previewRef.current.srcObject = stream;
+        void previewRef.current.play().catch(e => console.warn("Preview playback unavailable", e));
       }
 
       // Handle stream end by user browser UI
@@ -315,21 +320,23 @@ export default function App() {
     }
   };
 
-  // Reattach the screen-sharing stream when returning to the monitoring tab.
-  // The video element is unmounted when another tab is selected.
+  // Keep capture decoding alive while tabs change. Reconnect only the visible preview.
   useEffect(() => {
-    if (activeTab !== "monitor" || !isMonitoring || !mediaStreamRef.current || !videoRef.current) return;
-
-    const video = videoRef.current;
+    if (!isMonitoring || !mediaStreamRef.current) return;
     const stream = mediaStreamRef.current;
     const track = stream.getVideoTracks()[0];
     if (!track || track.readyState !== "live") {
       stopMonitoring();
       return;
     }
-
-    if (video.srcObject !== stream) video.srcObject = stream;
-    video.play().catch((error) => console.warn("Screen preview playback failed:", error));
+    if (videoRef.current && videoRef.current.srcObject !== stream) {
+      videoRef.current.srcObject = stream;
+      void videoRef.current.play().catch(e => console.warn("Decoder playback failed", e));
+    }
+    if (activeTab === "monitor" && previewRef.current) {
+      previewRef.current.srcObject = stream;
+      void previewRef.current.play().catch(e => console.warn("Preview playback failed", e));
+    }
   }, [activeTab, isMonitoring]);
 
   // Stop Monitoring
@@ -349,9 +356,8 @@ export default function App() {
     }
     setIsMonitoring(false);
     setIsPaused(false);
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    if (previewRef.current) previewRef.current.srcObject = null;
   };
 
   const togglePause = () => {
@@ -566,8 +572,8 @@ export default function App() {
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white">
       {/* Hidden canvas for sampling */}
       <canvas ref={canvasRef} className="hidden" />
-      {/* Keep a decoder mounted while user views alerts/history, so captures can continue. */}
-      {activeTab !== "monitor" && <video ref={videoRef} autoPlay playsInline muted className="hidden" />}
+      {/* Stable capture decoder: never unmount it when switching navigation tabs. */}
+      <video ref={videoRef} autoPlay playsInline muted className="hidden" />
 
 
       {/* Header */}
@@ -865,7 +871,7 @@ export default function App() {
 
                 <div className="relative aspect-video bg-[#080a0e] rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center">
                   <video
-                    ref={videoRef}
+                    ref={previewRef}
                     autoPlay
                     playsInline
                     muted
