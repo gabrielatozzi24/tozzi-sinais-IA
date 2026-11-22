@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { SignalRecord, SignalStatus, signalKey, upsertSignal, summarizeSignals, isConfirmed } from "../signalHistory.js";
+import { SignalRecord, SignalStatus, signalKey, upsertSignal, summarizeSignals, isConfirmed, historyGroup, wasTaken, canRecordOutcome } from "../signalHistory.js";
 import {
   Activity,
   Play,
@@ -82,6 +82,7 @@ export default function App() {
   const [currentVisionResult, setCurrentVisionResult] = useState<any>(null);
   const [currentGuardResult, setCurrentGuardResult] = useState<any>(null);
   const [extraBots, setExtraBots] = useState<any>(null);
+  const [historyView, setHistoryView] = useState<"CONFIRMED" | "UNCONFIRMED" | "ALL">("CONFIRMED");
   const [signalsHistory, setSignalsHistory] = useState<SignalRecord[]>(() => {
     try {
       const raw = localStorage.getItem("tozzi_signal_history_v2");
@@ -614,19 +615,37 @@ export default function App() {
     setTests(results);
   };
 
+  const markSignalAction = (targetEpoch: number, asset: string, action: "TAKEN" | "IGNORED") => {
+    setSignalsHistory(previous => previous.map(item =>
+      Number(item.targetEpoch) === targetEpoch && item.asset === asset && isConfirmed(item)
+        ? { ...item, tradeAction: action,
+            result: action === "IGNORED" ? "PENDENTE" : item.result,
+            updatedAt: new Date().toISOString() } : item
+    ));
+  };
+  const markHistoryAction = (id: string, action: "TAKEN" | "IGNORED") => {
+    setSignalsHistory(previous => previous.map(item =>
+      item.id === id && isConfirmed(item)
+        ? { ...item, tradeAction: action,
+            result: action === "IGNORED" ? "PENDENTE" : item.result,
+            updatedAt: new Date().toISOString() } : item
+    ));
+  };
   const updateHistoryResult = (id: string, outcome: "WIN" | "LOSS") => {
     setSignalsHistory(previous => previous.map(item =>
-      item.id === id && isConfirmed(item) && item.decision !== "AGUARDAR"
+      item.id === id && canRecordOutcome(item)
         ? { ...item, result: outcome, updatedAt: new Date().toISOString() } : item
     ));
   };
+  const currentSignal = candidate ? signalsHistory.find(item => Number(item.targetEpoch) === candidate.targetEpoch && item.asset === candidate.asset && isConfirmed(item)) : undefined;
+  const visibleHistory = signalsHistory.filter(item => historyView === "ALL" || historyGroup(item) === historyView);
   const historyStats = summarizeSignals(signalsHistory);
   const winRate = historyStats.winRate;
   const formatRecordDate = (iso: string) =>
     new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
   const exportHistoryCSV = () => {
     const cols = ["timestamp","updatedAt","asset","optionMode","timeframe","expiration",
-      "decision","status","reason","guardPassed","latencyMs","result","targetEpoch"];
+      "decision","status","reason","guardPassed","latencyMs","tradeAction","result","targetEpoch","confirmedReason"];
     const cell = (value: unknown) => {
       const str = String(value ?? "");
       // Neutralize spreadsheet formulas in exported user/model text.
@@ -1200,7 +1219,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {signalsHistory.filter((s) => s.decision !== "AGUARDAR").length === 0 ? (
+              {signalsHistory.filter((s) => isConfirmed(s) && s.decision !== "AGUARDAR").length === 0 ? (
                 <div className="col-span-full bg-[#121620] border border-slate-800 rounded-2xl p-12 text-center space-y-3">
                   <Clock className="w-10 h-10 text-slate-600 mx-auto animate-spin" />
                   <p className="text-sm font-medium text-slate-300">Aguardando oportunidade de compra ou venda validada...</p>
@@ -1208,7 +1227,7 @@ export default function App() {
                 </div>
               ) : (
                 signalsHistory
-                  .filter((s) => s.decision !== "AGUARDAR")
+                  .filter((s) => isConfirmed(s) && s.decision !== "AGUARDAR")
                   .map((signal) => (
                     <div
                       key={signal.id}
@@ -1275,7 +1294,7 @@ export default function App() {
                   <span>Histórico de Operações & Estatísticas</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Registros com data e hora, inclusive oportunidades sem confirmação. WIN e LOSS são informados manualmente apenas para operações confirmadas executadas.
+                  Registros com data e hora, inclusive oportunidades sem confirmação. Somente sinais confirmados entram na aba inicial. Marque PEGUEI O SINAL ou IGNOREI; WIN e LOSS são manuais apenas para sinais que você pegou.
                   <span className="block text-amber-200/80 mt-1">Salvo neste navegador. Para guardar uma cópia ou analisar em outro dispositivo, exporte o CSV.</span>
                 </p>
               </div>
