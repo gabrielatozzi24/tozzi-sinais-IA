@@ -293,6 +293,9 @@ export default function App() {
       confirmBusyRef.current = false;
       setCandidateSafe(null);
       setAnalysisError(null);
+      setCurrentVisionResult(null);
+      setCurrentGuardResult(null);
+      setExtraBots(null);
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "window" },
         audio: false
@@ -346,6 +349,10 @@ export default function App() {
   const stopMonitoring = () => {
     sessionRef.current++;
     setCandidateSafe(null);
+    setCurrentVisionResult(null);
+    setCurrentGuardResult(null);
+    setExtraBots(null);
+    setAnalysisError(null);
     activeRequestRef.current?.abort();
     analysisBusyRef.current = false;
     setIsAnalyzing(false);
