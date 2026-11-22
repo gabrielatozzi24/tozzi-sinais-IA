@@ -1,4 +1,5 @@
 import express from "express";
+import { timingSafeEqual } from "node:crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -36,6 +37,28 @@ async function startServer() {
   // Connected WebSocket clients for real-time mobile alerts
   const clients = new Set<WebSocket>();
   const getAccessCode = () => process.env.TOZZI_ACCESS_CODE || "";
+  // Explicit login confirmation; server remains the authority for every API request.
+  const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  app.post("/api/login", (req, res) => {
+    const ip = req.ip || "unknown";
+    const now = Date.now();
+    let entry = loginAttempts.get(ip);
+    if (!entry || now >= entry.resetAt) entry = { count: 0, resetAt: now + 60_000 };
+    entry.count++;
+    loginAttempts.set(ip, entry);
+    if (entry.count > 10) return res.status(429).json({ error: "Muitas tentativas de acesso. Aguarde um minuto." });
+    const expected = getAccessCode();
+    if (!expected) return res.status(503).json({ error: "Configure TOZZI_ACCESS_CODE no Render." });
+    const supplied = req.body?.code;
+    if (typeof supplied !== "string" || supplied.length < 8 || supplied.length > 64)
+      return res.status(401).json({ error: "Código inválido." });
+    const received = Buffer.from(supplied);
+    const stored = Buffer.from(expected);
+    const valid = received.length === stored.length && timingSafeEqual(received, stored);
+    if (!valid) return res.status(401).json({ error: "Senha incorreta. Confira o código definido no Render." });
+    loginAttempts.delete(ip);
+    return res.json({ ok: true });
+  });
   app.use("/api", (req, res, next) => {
     const expected = getAccessCode();
     if (!expected) return res.status(503).json({ error: "Configure TOZZI_ACCESS_CODE no Render para proteger a API." });
