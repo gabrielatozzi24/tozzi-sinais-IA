@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
+import { SignalRecord, SignalStatus, signalKey, upsertSignal, summarizeSignals, isConfirmed } from "../signalHistory.js";
 import {
   Activity,
   Play,
@@ -31,20 +32,6 @@ import {
   Gauge,
   Bell
 } from "lucide-react";
-
-interface SignalRecord {
-  id: string;
-  timestamp: string;
-  asset: string;
-  timeframe: string;
-  expiration: string;
-  decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA" | "AGUARDAR";
-  reason: string;
-  guardPassed: boolean;
-  guardReason: string;
-  latencyMs: number;
-  result?: "WIN" | "LOSS" | "PENDENTE";
-}
 
 interface TestItem {
   id: number;
@@ -95,13 +82,67 @@ export default function App() {
   const [currentVisionResult, setCurrentVisionResult] = useState<any>(null);
   const [currentGuardResult, setCurrentGuardResult] = useState<any>(null);
   const [extraBots, setExtraBots] = useState<any>(null);
-  const [signalsHistory, setSignalsHistory] = useState<SignalRecord[]>([]);
+  const [signalsHistory, setSignalsHistory] = useState<SignalRecord[]>(() => {
+    try {
+      const raw = localStorage.getItem("tozzi_signal_history_v2");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((item: any) =>
+        typeof item.id === "string" && typeof item.key === "string" && typeof item.timestamp === "string").slice(0, 1500) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("tozzi_signal_history_v2", JSON.stringify(signalsHistory)); }
+    catch (e) { console.warn("Armazenamento de histórico cheio ou indisponível", e); }
+  }, [signalsHistory]);
+  const recordSignal = (data: {
+    targetEpoch: number; asset: string; timeframe: string; expiration: string; optionMode?: string;
+    decision: SignalRecord["decision"]; status: SignalStatus; reason: string; latencyMs?: number;
+  }) => {
+    const at = new Date().toISOString();
+    const key = signalKey(data);
+    const incoming: SignalRecord = {
+      id: crypto.randomUUID(), key, timestamp: at, updatedAt: at,
+      targetEpoch: data.targetEpoch, asset: data.asset, timeframe: data.timeframe,
+      expiration: data.expiration, optionMode: data.optionMode,
+      decision: data.decision, reason: data.reason, guardReason: data.reason,
+      guardPassed: data.status === "CONFIRMED" || data.status === "CLOSED",
+      latencyMs: data.latencyMs || 0, status: data.status, result: "PENDENTE",
+      stages: [{ status: data.status, at, reason: data.reason }]
+    };
+    setSignalsHistory(previous => upsertSignal(previous, incoming));
+  };
 
   // Sound & Notifications
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
-  const [accessCode, setAccessCode] = useState(() => localStorage.getItem("tozzi_signals_access") || "");
-  useEffect(() => { localStorage.setItem("tozzi_signals_access", accessCode); }, [accessCode]);
+  const [accessCode, setAccessCode] = useState("");
+  const [passwordEntry, setPasswordEntry] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  useEffect(() => { localStorage.removeItem("tozzi_signals_access"); }, []);
+  const submitLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (loginBusy) return;
+    setLoginError("");
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(passwordEntry)) {
+      setLoginError("Digite o código privado (8 a 64 caracteres, letras, números, _ ou -).");
+      return;
+    }
+    setLoginBusy(true);
+    try {
+      const response = await fetch("/api/login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: passwordEntry })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok !== true) throw new Error(data.error || "Não foi possível confirmar a senha.");
+      setAccessCode(passwordEntry);
+      setPasswordEntry("");
+      setAuthenticated(true);
+    } catch (e: any) { setLoginError(e.message || "Falha na confirmação do acesso."); }
+    finally { setLoginBusy(false); }
+  };
 
   // Media stream refs
   const videoRef = useRef<HTMLVideoElement | null>(null); // persistent capture decoder
@@ -157,8 +198,13 @@ export default function App() {
     const previous = candidateRef.current;
     candidateRef.current = next;
     setCandidate(next);
-    if (next && (previous?.targetEpoch !== next.targetEpoch || previous.status !== next.status)) {
-      notifyBrowser(next);
+    if (next && (previous?.targetEpoch !== next.targetEpoch || previous.status !== next.status || previous.reason !== next.reason)) {
+      recordSignal({
+        targetEpoch: next.targetEpoch, asset: next.asset, timeframe: next.timeframe,
+        expiration: next.expiration, optionMode: optionMode, decision: next.decision,
+        status: next.status, reason: next.reason
+      });
+      if (previous?.status !== next.status) notifyBrowser(next);
     }
   };
   useEffect(() => {
@@ -200,7 +246,7 @@ export default function App() {
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${protocol}//${window.location.host}`;
-    if (!accessCode || !/^[A-Za-z0-9_-]{8,64}$/.test(accessCode)) {
+    if (!authenticated || !accessCode || !/^[A-Za-z0-9_-]{8,64}$/.test(accessCode)) {
       setWsConnected(false);
       return;
     }
@@ -238,12 +284,7 @@ export default function App() {
             setCandidateSafe(next);
             if (soundEnabled) playAlertSound(data.type === "CONFIRMED" ? direction : "AGUARDAR");
             if (data.type === "CONFIRMED") {
-              setSignalsHistory(prev => [{
-                id: crypto.randomUUID(), timestamp: new Date().toLocaleTimeString("pt-BR"), asset: next.asset,
-                timeframe: next.timeframe, expiration: next.expiration, decision: next.decision,
-                reason: next.reason + " Entrada prevista: " + formatEntryTime(targetEpoch),
-                guardPassed: true, guardReason: next.reason, latencyMs: Number(data.latencyMs) || 0, result: "PENDENTE"
-              }, ...prev.slice(0, 49)]);
+              // setCandidateSafe has already recorded the confirmation.
             }
           }
         }
@@ -255,7 +296,7 @@ export default function App() {
     return () => {
       ws.close();
     };
-  }, [soundEnabled, accessCode]);
+  }, [soundEnabled, accessCode, authenticated]);
 
   // Two clear, slightly louder beeps. Browser/system volume remains authoritative.
   const playAlertSound = (decision: string) => {
@@ -493,6 +534,14 @@ export default function App() {
       overloadUntilRef.current = 0;
       setOverloadUntil(0);
       if (phase === "PREPARE") {
+        if (!allowed) {
+          recordSignal({
+            targetEpoch, asset: customAsset || selectedAsset, timeframe: selectedTimeframe,
+            expiration: selectedExpiration, optionMode,
+            decision: direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA" ? direction : "AGUARDAR",
+            status: "AGUARDAR", reason, latencyMs
+          });
+        }
         if (allowed) {
           const next: Candidate = { targetEpoch, decision: direction, asset: customAsset || selectedAsset,
             timeframe: selectedTimeframe, expiration: selectedExpiration, status: "PRE_ALERT",
@@ -513,11 +562,7 @@ export default function App() {
           setCandidateSafe(next);
           if (soundEnabled) playAlertSound(allowed ? direction : "AGUARDAR");
           if (allowed) {
-            const record: SignalRecord = { id: crypto.randomUUID(),
-              timestamp: new Date().toLocaleTimeString("pt-BR"), asset: next.asset,
-              timeframe: next.timeframe, expiration: next.expiration, decision: next.decision,
-              reason: next.reason, guardPassed: true, guardReason: reason, latencyMs, result: "PENDENTE" };
-            setSignalsHistory(prev => [record, ...prev.slice(0, 49)]);
+            // setCandidateSafe has already recorded the confirmation.
           }
         }
       }
@@ -569,15 +614,33 @@ export default function App() {
     setTests(results);
   };
 
-  const updateHistoryResult = (id: string, res: "WIN" | "LOSS") => {
-    setSignalsHistory(prev => prev.map(item =>
-      item.id === id && item.guardPassed && item.decision !== "AGUARDAR" ? { ...item, result: res } : item
+  const updateHistoryResult = (id: string, outcome: "WIN" | "LOSS") => {
+    setSignalsHistory(previous => previous.map(item =>
+      item.id === id && isConfirmed(item) && item.decision !== "AGUARDAR"
+        ? { ...item, result: outcome, updatedAt: new Date().toISOString() } : item
     ));
   };
-
-  const completedSignals = signalsHistory.filter(s => s.guardPassed && s.decision !== "AGUARDAR" && (s.result === "WIN" || s.result === "LOSS"));
-  const winsCount = completedSignals.filter((s) => s.result === "WIN").length;
-  const winRate = completedSignals.length > 0 ? ((winsCount / completedSignals.length) * 100).toFixed(1) : null;
+  const historyStats = summarizeSignals(signalsHistory);
+  const winRate = historyStats.winRate;
+  const formatRecordDate = (iso: string) =>
+    new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+  const exportHistoryCSV = () => {
+    const cols = ["timestamp","updatedAt","asset","optionMode","timeframe","expiration",
+      "decision","status","reason","guardPassed","latencyMs","result","targetEpoch"];
+    const cell = (value: unknown) => {
+      const str = String(value ?? "");
+      // Neutralize spreadsheet formulas in exported user/model text.
+      const safe = /^[=+@\-\t\r]/.test(str) ? "'" + str : str;
+      return '"' + safe.replace(/"/g, '""') + '"';
+    };
+    const csv = "\uFEFF" + cols.join(";") + "\r\n" +
+      signalsHistory.map(item => cols.map(key => cell((item as any)[key])).join(";")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "tozzi-historico-" + new Date().toISOString().slice(0,10) + ".csv";
+    a.click(); URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="min-h-screen bg-[#0b0e14] text-slate-100 flex flex-col font-sans selection:bg-purple-600 selection:text-white">
