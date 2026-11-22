@@ -159,7 +159,7 @@ export default function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const overloadUntilRef = useRef(0);
   const [overloadUntil, setOverloadUntil] = useState(0);
-  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "UNVERIFIED"; reason: string };
+  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; optionMode?: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "UNVERIFIED"; reason: string };
   const candidateRef = useRef<Candidate | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [dismissedPopupKey, setDismissedPopupKey] = useState("");
@@ -201,7 +201,7 @@ export default function App() {
     if (next && (previous?.targetEpoch !== next.targetEpoch || previous.status !== next.status || previous.reason !== next.reason)) {
       recordSignal({
         targetEpoch: next.targetEpoch, asset: next.asset, timeframe: next.timeframe,
-        expiration: next.expiration, optionMode: optionMode, decision: next.decision,
+        expiration: next.expiration, optionMode: next.optionMode || optionMode, decision: next.decision,
         status: next.status, reason: next.reason
       });
       if (previous?.status !== next.status) notifyBrowser(next);
@@ -268,7 +268,7 @@ export default function App() {
           if (data.type === "PRE_ALERT") {
             if (targetEpoch < Date.now() + 30000) return;
             const next: Candidate = { targetEpoch, decision: direction, asset: data.asset,
-              timeframe: data.timeframe, expiration: data.expiration,
+              timeframe: data.timeframe, expiration: data.expiration, optionMode: data.optionMode,
               status: "PRE_ALERT", reason: "Pré-alerta. NÃO ENTRAR: aguarde confirmação perto do horário." };
             setCandidateSafe(next);
             if (soundEnabled) playAlertSound(direction);
@@ -544,7 +544,7 @@ export default function App() {
         }
         if (allowed) {
           const next: Candidate = { targetEpoch, decision: direction, asset: customAsset || selectedAsset,
-            timeframe: selectedTimeframe, expiration: selectedExpiration, status: "PRE_ALERT",
+            timeframe: selectedTimeframe, expiration: selectedExpiration, optionMode, status: "PRE_ALERT",
             reason: "Possível " + (direction === "POSSÍVEL COMPRA" ? "COMPRA" : "VENDA") +
               " às " + formatEntryTime(targetEpoch) + ". NÃO ENTRE ainda; aguardando reconfirmação." };
           setCandidateSafe(next);
@@ -1225,19 +1225,36 @@ export default function App() {
                   <span>Histórico de Operações & Estatísticas</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Registro completo de análises do monitoramento contínuo.
+                  Registros com data e hora, inclusive oportunidades sem confirmação. WIN e LOSS são informados manualmente apenas para operações confirmadas executadas.
+                  <span className="block text-amber-200/80 mt-1">Salvo neste navegador. Para guardar uma cópia ou analisar em outro dispositivo, exporte o CSV.</span>
                 </p>
               </div>
 
-              <div className="flex items-center space-x-4">
-                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-500 block">Total Registrados</span>
-                  <span className="text-sm font-bold text-slate-200">{signalsHistory.length}</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-orange-500/25 text-center">
+                  <span className="text-[10px] text-orange-200 block">Todos os sinais</span>
+                  <span className="text-lg font-bold text-white">{historyStats.total}</span>
                 </div>
-                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-slate-800 text-center">
-                  <span className="text-[10px] text-slate-500 block">Taxa de Acerto (Verificado)</span>
-                  <span className="text-sm font-bold text-purple-400">{winRate !== null ? `${winRate}%` : "Aguardando dados"}</span>
+                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-green-500/25 text-center">
+                  <span className="text-[10px] text-green-200 block">Confirmados</span>
+                  <span className="text-lg font-bold text-green-300">{historyStats.confirmed}</span>
                 </div>
+                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-amber-500/25 text-center">
+                  <span className="text-[10px] text-amber-200 block">Sem confirmação</span>
+                  <span className="text-lg font-bold text-amber-300">{historyStats.unconfirmed}</span>
+                </div>
+                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-slate-700 text-center">
+                  <span className="text-[10px] text-slate-400 block">WIN / LOSS marcados</span>
+                  <span className="text-lg font-bold text-purple-300">{historyStats.wins} / {historyStats.losses}</span>
+                </div>
+                <div className="bg-[#181d2a] px-4 py-2 rounded-xl border border-orange-500/25 text-center">
+                  <span className="text-[10px] text-slate-400 block">Taxa de acerto manual</span>
+                  <span className="text-lg font-bold text-orange-300">{winRate !== null ? `${winRate}%` : "Sem dados"}</span>
+                </div>
+                <button type="button" onClick={exportHistoryCSV}
+                  className="rounded-xl border border-orange-500/50 px-4 py-3 text-sm font-semibold text-orange-200 hover:bg-orange-950/30">
+                  Exportar CSV
+                </button>
               </div>
             </div>
 
@@ -1246,11 +1263,11 @@ export default function App() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-[#181d2a] border-b border-slate-800 text-slate-400 uppercase">
                     <tr>
-                      <th className="p-3">Horário</th>
+                      <th className="p-3">Data e hora</th>
                       <th className="p-3">Ativo</th>
                       <th className="p-3">Período/Exp</th>
                       <th className="p-3">Decisão Bot</th>
-                      <th className="p-3">Guard Status</th>
+                      <th className="p-3">Situação do sinal</th>
                       <th className="p-3">Latência</th>
                       <th className="p-3">Resultado</th>
                     </tr>
@@ -1265,7 +1282,7 @@ export default function App() {
                     ) : (
                       signalsHistory.map((item) => (
                         <tr key={item.id} className="hover:bg-slate-900/40 transition-colors">
-                          <td className="p-3 font-mono text-slate-400">{item.timestamp}</td>
+                          <td className="p-3 font-mono text-slate-400 whitespace-nowrap">{formatRecordDate(item.timestamp)}</td>
                           <td className="p-3 font-semibold text-slate-200">{item.asset}</td>
                           <td className="p-3">{item.timeframe} / {item.expiration}</td>
                           <td className="p-3">
@@ -1278,26 +1295,30 @@ export default function App() {
                             </span>
                           </td>
                           <td className="p-3">
-                            {item.guardPassed ? (
-                              <span className="text-green-400 flex items-center space-x-1"><CheckCircle2 className="w-3.5 h-3.5" /><span>Aprovado</span></span>
-                            ) : (
-                              <span className="text-red-400 flex items-center space-x-1"><XCircle className="w-3.5 h-3.5" /><span>Bloqueado</span></span>
-                            )}
+                            <span className={`text-xs font-semibold ${isConfirmed(item) ? "text-green-400" :
+                              item.status === "CANCELLED" ? "text-red-400" :
+                              item.status === "PRE_ALERT" ? "text-orange-300" : "text-amber-300"}`}
+                              title={item.reason}>
+                              {isConfirmed(item) ? "CONFIRMADO" :
+                                item.status === "CANCELLED" ? "CANCELADO" :
+                                item.status === "PRE_ALERT" ? "PRÉ-ALERTA" : "SEM CONFIRMAÇÃO"}
+                            </span>
+                            <p className="max-w-[250px] text-[10px] text-slate-500 mt-1">{item.reason}</p>
                           </td>
                           <td className="p-3 font-mono">{item.latencyMs}ms</td>
                           <td className="p-3">
                             <div className="flex space-x-1">
                               <button
-                                disabled={!item.guardPassed || item.decision === "AGUARDAR"}
-                                title={item.decision === "AGUARDAR" ? "AGUARDAR não é uma operação" : "Registrar WIN manual"}
+                                disabled={!isConfirmed(item) || item.decision === "AGUARDAR"}
+                                title={!isConfirmed(item) ? "Sinal sem confirmação não entra nas estatísticas de operações." : "Registrar WIN somente se você executou a operação."}
                                 onClick={() => updateHistoryResult(item.id, "WIN")}
                                 className={`px-2 py-0.5 rounded font-bold text-[10px] ${item.result === "WIN" ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
                               >
                                 WIN
                               </button>
                               <button
-                                disabled={!item.guardPassed || item.decision === "AGUARDAR"}
-                                title={item.decision === "AGUARDAR" ? "AGUARDAR não é uma operação" : "Registrar LOSS manual"}
+                                disabled={!isConfirmed(item) || item.decision === "AGUARDAR"}
+                                title={!isConfirmed(item) ? "Sinal sem confirmação não entra nas estatísticas de operações." : "Registrar LOSS somente se você executou a operação."}
                                 onClick={() => updateHistoryResult(item.id, "LOSS")}
                                 className={`px-2 py-0.5 rounded font-bold text-[10px] ${item.result === "LOSS" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
                               >
