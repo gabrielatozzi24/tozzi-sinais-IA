@@ -264,7 +264,15 @@ Analise minuciosamente a imagem fornecida do gráfico:
         timeframe: selectedTimeframe, phase: stage
       });
       const trend = trendBot(vision, direction);
-      const candles = candleBot(vision, direction);
+      // The Guard may decline by setting finalDecision=AGUARDAR. In that case,
+      // reviewing candles against AGUARDAR would produce a misleading generic
+      // "no direction" message instead of exposing the actual rejection reason.
+      // For diagnostics only, inspect the visual proposal. Never override Guard approval.
+      const candleReviewDirection = direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA"
+        ? direction : vision.decision;
+      const candles = candleBot(vision, candleReviewDirection);
+      const guardDeclined = guard.passed !== true ||
+        (direction !== "POSSÍVEL COMPRA" && direction !== "POSSÍVEL VENDA");
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
         assetAligned && timeframeAligned && ch.contradictory === false && ch.contextOk === true &&
         candleAligned && previousAligned && visionAgrees && timeframeAligned && assetAligned && withinWindow &&
@@ -273,6 +281,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         analysisData.guardResult = {
           ...guard, passed: false, finalDecision: "AGUARDAR",
           guardReason: !timing.passed ? "Timing Bot: " + timing.reason
+            : guardDeclined ? "Signal Guard: " + (guard.guardReason || vision.reason || "Análise visual sem direção segura; aguardando nova captura.")
             : !candles.passed ? "Candle Bot: " + candles.reason
             : !trend.passed ? "Trend Bot: " + trend.reason
             : !candleAligned ? "Tendência, última vela fechada ou correção atual sem confirmação suficiente. Aguardando estrutura clara."
