@@ -461,11 +461,12 @@ export default function App() {
       setApiCallCount(v => v + 1);
       if (!res.ok) {
         const details = await res.json().catch(() => ({}));
-        if (res.status === 503 && details?.type === "GEMINI_UNAVAILABLE") {
-          const retrySeconds = Math.max(30, Math.min(300, Number(details.retryAfterSeconds) || 60));
+        if ((res.status === 429 || res.status === 503) &&
+          ["GEMINI_QUOTA", "GEMINI_UNAVAILABLE", "API_RATE_LIMIT", "ANALYSIS_BUSY"].includes(details?.type)) {
+          const retrySeconds = Math.max(1, Math.min(1800, Number(details.retryAfterSeconds) || 60));
           overloadUntilRef.current = Date.now() + retrySeconds * 1000;
           setOverloadUntil(overloadUntilRef.current);
-          throw new Error(details.error || "Gemini sobrecarregado. Aguardando nova tentativa.");
+          throw new Error(details.error || "Controle de consultas ativo. Aguardando próxima tentativa.");
         }
         throw new Error(details?.error || "Erro HTTP " + res.status);
       }
@@ -987,7 +988,7 @@ export default function App() {
 
                   {analysisError && <p className="mb-2 text-xs text-amber-300">Falha técnica: {analysisError}</p>}
                   {overloadUntil > nowEpoch && <p className="mb-2 text-xs text-amber-200">
-                    Gemini em pausa automática. Nova tentativa em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos.
+                    API em pausa automática. Nova tentativa em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos.
                   </p>}
                   {currentGuardResult?.technicalError ? (
                     <p className="text-xs text-amber-300 rounded-xl bg-amber-950/20 p-3">
