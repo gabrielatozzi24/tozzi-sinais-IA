@@ -1257,10 +1257,18 @@ export default function App() {
                         {signal.reason}
                       </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                      <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-800 text-xs">
+                      <button type="button" onClick={() => markHistoryAction(signal.id, "TAKEN")}
+                        className={`rounded-lg px-3 py-2 font-bold ${wasTaken(signal) ? "bg-purple-600 text-white" : "bg-slate-700 text-slate-200"}`}>✓ PEGUEI O SINAL</button>
+                      <button type="button" onClick={() => markHistoryAction(signal.id, "IGNORED")}
+                        className={`rounded-lg px-3 py-2 font-bold ${signal.tradeAction === "IGNORED" ? "bg-amber-600 text-black" : "bg-slate-700 text-slate-200"}`}>IGNORAR</button>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
                         <span className="text-slate-500">Resultado da Operação:</span>
                         <div className="flex space-x-1">
                           <button
+                            disabled={!canRecordOutcome(signal)}
+                            title="Marque PEGUEI antes de registrar WIN/LOSS."
                             onClick={() => updateHistoryResult(signal.id, "WIN")}
                             className={`px-2 py-1 rounded font-bold text-[10px] transition-all ${
                               signal.result === "WIN" ? "bg-green-600 text-white shadow" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
@@ -1269,6 +1277,8 @@ export default function App() {
                             WIN
                           </button>
                           <button
+                            disabled={!canRecordOutcome(signal)}
+                            title="Marque PEGUEI antes de registrar WIN/LOSS."
                             onClick={() => updateHistoryResult(signal.id, "LOSS")}
                             className={`px-2 py-1 rounded font-bold text-[10px] transition-all ${
                               signal.result === "LOSS" ? "bg-red-600 text-white shadow" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
@@ -1327,6 +1337,13 @@ export default function App() {
               </div>
             </div>
 
+            <div className="flex flex-wrap gap-2 rounded-2xl bg-[#121620] p-3 border border-slate-800" role="group" aria-label="Filtrar histórico de sinais">
+              {([{value:"CONFIRMED",label:"✅ Confirmados"}, {value:"UNCONFIRMED",label:"⚠️ Sem confirmação"}, {value:"ALL",label:"Todos"}] as const).map(filter => (
+                <button key={filter.value} type="button" onClick={() => setHistoryView(filter.value)}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-bold ${historyView === filter.value ? "bg-purple-600 text-white" : "bg-[#1c2030] text-slate-300 hover:bg-slate-700"}`}>{filter.label}</button>
+              ))}
+              <span className="ml-auto text-xs text-slate-400 self-center">{visibleHistory.length} registros nesta visualização</span>
+            </div>
             <div className="bg-[#121620] border border-slate-800/80 rounded-2xl overflow-hidden shadow-xl">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -1342,14 +1359,14 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800 text-slate-300">
-                    {signalsHistory.length === 0 ? (
+                    {visibleHistory.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="p-6 text-center text-slate-500 italic">
                           Nenhum registro no histórico ainda. Inicie o monitoramento ao vivo.
                         </td>
                       </tr>
                     ) : (
-                      signalsHistory.map((item) => (
+                      visibleHistory.map((item) => (
                         <tr key={item.id} className="hover:bg-slate-900/40 transition-colors">
                           <td className="p-3 font-mono text-slate-400 whitespace-nowrap">{formatRecordDate(item.timestamp)}</td>
                           <td className="p-3 font-semibold text-slate-200">{item.asset}</td>
@@ -1368,26 +1385,32 @@ export default function App() {
                               item.status === "CANCELLED" ? "text-red-400" :
                               item.status === "PRE_ALERT" ? "text-orange-300" : "text-amber-300"}`}
                               title={item.reason}>
-                              {isConfirmed(item) ? "CONFIRMADO" :
+                              {isConfirmed(item) ? (item.tradeAction === "IGNORED" ? "CONFIRMADO · IGNORADO" : wasTaken(item) ? "CONFIRMADO · PEGUEI" : "CONFIRMADO · A DECIDIR") :
                                 item.status === "CANCELLED" ? "CANCELADO" :
                                 item.status === "PRE_ALERT" ? "PRÉ-ALERTA" : "SEM CONFIRMAÇÃO"}
                             </span>
-                            <p className="max-w-[250px] text-[10px] text-slate-500 mt-1">{item.reason}</p>
+                            <p className="max-w-[250px] text-[10px] text-slate-500 mt-1">{item.confirmedReason || item.reason}</p>
                           </td>
                           <td className="p-3 font-mono">{item.latencyMs}ms</td>
                           <td className="p-3">
+                            {isConfirmed(item) ? <div className="flex flex-wrap gap-1 mb-2">
+                              <button type="button" onClick={() => markHistoryAction(item.id, "TAKEN")}
+                                className={`rounded px-2 py-1 text-[10px] font-bold ${wasTaken(item) ? "bg-purple-600 text-white" : "bg-slate-700 text-slate-200"}`}>PEGUEI</button>
+                              <button type="button" onClick={() => markHistoryAction(item.id, "IGNORED")}
+                                className={`rounded px-2 py-1 text-[10px] font-bold ${item.tradeAction === "IGNORED" ? "bg-amber-600 text-black" : "bg-slate-700 text-slate-200"}`}>IGNOREI</button>
+                            </div> : <span className="text-amber-300 text-[10px] font-bold">NÃO ENTRAR · SEM RESULTADO</span>}
                             <div className="flex space-x-1">
                               <button
-                                disabled={!isConfirmed(item) || item.decision === "AGUARDAR"}
-                                title={!isConfirmed(item) ? "Sinal sem confirmação não entra nas estatísticas de operações." : "Registrar WIN somente se você executou a operação."}
+                                disabled={!canRecordOutcome(item)}
+                                title={!canRecordOutcome(item) ? "Primeiro marque PEGUEI. Sinais ignorados ou sem confirmação não são operações." : "Registrar WIN manualmente."}
                                 onClick={() => updateHistoryResult(item.id, "WIN")}
                                 className={`px-2 py-0.5 rounded font-bold text-[10px] ${item.result === "WIN" ? "bg-green-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
                               >
                                 WIN
                               </button>
                               <button
-                                disabled={!isConfirmed(item) || item.decision === "AGUARDAR"}
-                                title={!isConfirmed(item) ? "Sinal sem confirmação não entra nas estatísticas de operações." : "Registrar LOSS somente se você executou a operação."}
+                                disabled={!canRecordOutcome(item)}
+                                title={!canRecordOutcome(item) ? "Primeiro marque PEGUEI. Sinais ignorados ou sem confirmação não são operações." : "Registrar LOSS manualmente."}
                                 onClick={() => updateHistoryResult(item.id, "LOSS")}
                                 className={`px-2 py-0.5 rounded font-bold text-[10px] ${item.result === "LOSS" ? "bg-red-600 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700"}`}
                               >
