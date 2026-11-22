@@ -670,7 +670,7 @@ export default function App() {
           <div className="rounded-2xl bg-gradient-to-br from-purple-600 to-orange-500 p-3 shadow-lg shadow-orange-500/20"><ShieldCheck className="h-7 w-7 text-white" /></div>
           <div>
             <h1 className="text-xl font-extrabold tracking-wide">TOZZI SINAIS IA <span className="text-orange-400">PRO</span></h1>
-            <p className="text-xs text-purple-200/75">Painel privado • 5 verificadores de sinais</p>
+            <p className="text-xs text-purple-200/75">Painel privado • 7 verificadores (2 experimentais)</p>
           </div>
         </div>
         <div className="space-y-2">
@@ -776,7 +776,7 @@ export default function App() {
       <section className="mx-4 sm:mx-8 mt-5 rounded-3xl border border-orange-400/30 bg-gradient-to-br from-[#211631] via-[#141827] to-[#201522] p-5 sm:p-7 shadow-2xl shadow-purple-950/30 space-y-3 relative overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-black tracking-wider text-orange-200">CENTRAL DE SINAIS • PRÓXIMA ENTRADA</h2>
-          <span className="text-xs text-slate-400">5 ROBÔS • ANÁLISE EM CAMADAS</span>
+          <span className="text-xs text-slate-400">7 ROBÔS • 2 EM OBSERVAÇÃO</span>
         </div>
         {candidate ? (
           <div className="space-y-2">
@@ -813,9 +813,9 @@ export default function App() {
       </section>
 
       <section className="mx-4 sm:mx-8 mt-4 rounded-3xl border border-white/10 bg-[#111624] p-5 shadow-xl shadow-black/20">
-        <h3 className="text-sm font-semibold text-purple-200">EQUIPE DE ANÁLISE • 5 VERIFICADORES</h3>
-        <p className="mt-1 text-xs text-slate-400">Timing Bot valida o horário; Trend e Candle revisam tendência e velas. Os três reaproveitam a mesma análise visual, sem chamadas extras.</p>
-        <div className="mt-4 grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+        <h3 className="text-sm font-semibold text-purple-200">EQUIPE DE ANÁLISE • 7 VERIFICADORES</h3>
+        <p className="mt-1 text-xs text-slate-400">Os 5 verificadores anteriores continuam decidindo os sinais. Precision Candle e Reversal Watch estão em observação: examinam força, pavios e reversões na MESMA leitura visual, sem chamadas extras e sem interferir nas entradas.</p>
+        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 text-xs">
           <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Vision Bot</strong><p className="text-slate-400 mt-1">Leitura do gráfico</p></div>
           <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Signal Guard</strong><p className="text-slate-400 mt-1">Filtro final</p></div>
           <div className="rounded-2xl border border-white/10 bg-[#191e2e] p-4 text-slate-200 shadow-inner shadow-black/20"><strong>Timing Bot</strong><p className={extraBots?.timing?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
@@ -827,7 +827,22 @@ export default function App() {
           <div className="rounded-2xl border border-orange-500/30 bg-gradient-to-br from-orange-900/20 to-[#191e2e] p-4 text-slate-200"><strong className="text-orange-200">Candle Bot</strong><p className={extraBots?.candles?.passed ? "text-green-400 mt-1" : "text-amber-300 mt-1"}>
             {extraBots?.candles?.reason || "Aguardando análise"}
           </p></div>
+          <div className="rounded-2xl border border-violet-500/40 bg-violet-950/20 p-4 text-slate-200">
+            <strong className="text-violet-200">Precision Candle Bot</strong>
+            <p className="text-[10px] font-bold text-violet-300 mt-1">OBSERVAÇÃO • CORPO E PAVIOS</p>
+            <p className={extraBots?.precisionCandle?.status === "FAVORAVEL" ? "text-green-400 mt-1" : extraBots?.precisionCandle?.status === "ATENCAO" ? "text-amber-300 mt-1" : "text-slate-400 mt-1"}>
+              {extraBots?.precisionCandle?.reason || "Aguardando captura"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-violet-500/40 bg-violet-950/20 p-4 text-slate-200">
+            <strong className="text-violet-200">Reversal Watch Bot</strong>
+            <p className="text-[10px] font-bold text-violet-300 mt-1">OBSERVAÇÃO • CONTINUAÇÃO / REVERSÃO</p>
+            <p className={extraBots?.reversalWatch?.status === "FAVORAVEL" ? "text-green-400 mt-1" : extraBots?.reversalWatch?.status === "ATENCAO" ? "text-amber-300 mt-1" : "text-slate-400 mt-1"}>
+              {extraBots?.reversalWatch?.reason || "Aguardando captura"}
+            </p>
+          </div>
         </div>
+        <p className="mt-3 text-[11px] text-slate-400">Os dois novos diagnósticos são experimentais. Não são IAs independentes, não representam votos adicionais e não alteram CONFIRMADO / SEM CONFIRMAÇÃO. Acompanhe os WIN/LOSS da demo para avaliar sua utilidade.</p>
       </section>
 
       {/* Navigation Tabs */}
@@ -1532,7 +1547,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-[#121620] border-t border-slate-800/80 py-4 px-6 text-center text-xs text-slate-500">
-        Tozzi Sinais IA PRO • Cinco verificadores • Resultados registrados manualmente • Sem execução de operações.
+        Tozzi Sinais IA PRO • 5 verificadores ativos + 2 em observação • Resultados registrados manualmente • Sem execução de operações.
       </footer>
     </div>
   );
