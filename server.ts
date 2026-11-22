@@ -26,6 +26,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // Server-wide limit includes all connected browsers and model requests.
 const usageGate = new ApiUsageGate(8);
 let geminiOverloadStreak = 0;
+let geminiQuotaStreak = 0;
 
 
 async function startServer() {
@@ -183,6 +184,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         usageGate.release();
       }
       geminiOverloadStreak = 0;
+      geminiQuotaStreak = 0;
       console.log("Chart analysis succeeded with model:", activeModel);
 
       const jsonText = response.text || "{}";
@@ -292,6 +294,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         vision: { name: "Tozzi Vision Bot", decision: vision.decision },
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
+      analysisData.apiUsage = usageGate.stats();
       analysisData.optionMode = marketMode;
       analysisData.phase = stage;
       analysisData.phaseEvent = phaseEvent;
@@ -305,8 +308,10 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const kind = classifyGeminiError(error);
       if (kind === "QUOTA" || kind === "OVERLOAD") {
         if (kind === "OVERLOAD") geminiOverloadStreak += 1;
+        if (kind === "QUOTA") geminiQuotaStreak += 1;
         const retryAfterSeconds = kind === "QUOTA"
-          ? 120 : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
+          ? Math.min(900, 120 * (2 ** Math.min(4, geminiQuotaStreak - 1)))
+          : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
         usageGate.pause(retryAfterSeconds);
         console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.");
         return res.status(kind === "QUOTA" ? 429 : 503)
