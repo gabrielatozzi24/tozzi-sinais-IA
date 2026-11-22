@@ -740,6 +740,20 @@ export default function App() {
         }} className="rounded-lg border border-orange-500/40 px-3 py-1.5 text-xs font-semibold text-orange-300 hover:bg-orange-900/20">Sair do app</button>
       </section>
 
+      <section className="mx-4 sm:mx-8 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-orange-500/25 bg-[#181726] p-3 sm:p-4">
+        <div className="flex items-center gap-2">
+          <History className="h-5 w-5 text-orange-300" />
+          <div>
+            <p className="text-sm font-bold text-white">Histórico de sinais e WIN/LOSS</p>
+            <p className="text-[11px] text-slate-400">{historyStats.total} registros neste dispositivo • data, hora e confirmação</p>
+          </div>
+        </div>
+        <button type="button" onClick={() => { setActiveTab("history"); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          className="rounded-xl bg-gradient-to-r from-purple-600 to-orange-500 px-5 py-3 text-sm font-extrabold text-white shadow-md shadow-orange-950/30 hover:brightness-110">
+          VER HISTÓRICO
+        </button>
+      </section>
+
       <section className="mx-4 sm:mx-8 mt-5 rounded-3xl border border-orange-400/30 bg-gradient-to-br from-[#211631] via-[#141827] to-[#201522] p-5 sm:p-7 shadow-2xl shadow-purple-950/30 space-y-3 relative overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-black tracking-wider text-orange-200">CENTRAL DE SINAIS • PRÓXIMA ENTRADA</h2>
@@ -798,7 +812,7 @@ export default function App() {
       </section>
 
       {/* Navigation Tabs */}
-      <div className="bg-[#0d101c]/90 backdrop-blur-xl border-y border-white/10 px-4 sm:px-8 mt-5 flex gap-2 overflow-x-auto">
+      <div className="bg-[#0d101c]/90 backdrop-blur-xl border-y border-white/10 px-4 sm:px-8 mt-5 grid grid-cols-2 md:flex md:gap-2">
         {[
           { id: "monitor", label: "Monitoramento ao Vivo", icon: Activity },
           { id: "alerts", label: "Painel de Alertas", icon: ShieldAlert },
@@ -811,7 +825,7 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center space-x-2 py-3 px-4 border-b-2 font-medium text-sm transition-all whitespace-nowrap ${
+              className={`flex items-center justify-center gap-2 py-3 px-2 sm:px-4 border-b-2 font-semibold text-xs sm:text-sm transition-all text-center ${
                 isActive
                   ? "border-orange-400 text-orange-200 bg-orange-500/10"
                   : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
