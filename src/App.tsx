@@ -54,14 +54,16 @@ interface TestItem {
   resultMessage?: string;
 }
 
-const POPULAR_OTC_ASSETS = [
-  "EUR/USD OTC",
-  "GBP/USD OTC",
-  "USD/BRL OTC",
-  "EUR/JPY OTC",
-  "AUD/USD OTC",
-  "USD/JPY OTC",
-  "GBP/JPY OTC"
+const OTC_ASSETS = [
+  "EUR/USD OTC", "GBP/USD OTC", "USD/BRL OTC", "EUR/JPY OTC", "AUD/USD OTC",
+  "USD/JPY OTC", "GBP/JPY OTC", "NZD/USD OTC", "EUR/GBP OTC", "EUR/AUD OTC",
+  "EUR/CAD OTC", "GBP/CAD OTC", "GBP/AUD OTC", "AUD/JPY OTC", "CAD/JPY OTC",
+  "USD/CAD OTC", "USD/CHF OTC", "EUR/CHF OTC", "AUD/CAD OTC", "NZD/JPY OTC"
+];
+const REGULAR_ASSETS = [
+  "EUR/USD", "GBP/USD", "USD/JPY", "EUR/JPY", "AUD/USD", "NZD/USD", "USD/CAD",
+  "USD/CHF", "EUR/GBP", "EUR/AUD", "EUR/CAD", "GBP/JPY", "GBP/AUD",
+  "AUD/JPY", "EUR/CHF", "GBP/CHF", "CAD/JPY", "AUD/CAD"
 ];
 
 export default function App() {
@@ -70,6 +72,7 @@ export default function App() {
 
   // Configuration
   const [selectedAsset, setSelectedAsset] = useState("EUR/USD OTC");
+  const [optionMode, setOptionMode] = useState<"BINARIA" | "DIGITAL">("BINARIA");
   const [customAsset, setCustomAsset] = useState("");
   const [selectedTimeframe, setSelectedTimeframe] = useState<"M1" | "M5">("M1");
   const [selectedExpiration, setSelectedExpiration] = useState<"1min" | "5min">("1min");
@@ -442,7 +445,7 @@ export default function App() {
         signal: controller.signal,
         body: JSON.stringify({
           imageBase64: dataUrl, selectedAsset: customAsset || selectedAsset,
-          selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp
+          selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp, optionMode
         })
       });
       if (sessionId !== sessionRef.current || pauseRef.current || !mediaStreamRef.current) return;
@@ -725,15 +728,29 @@ export default function App() {
 
                 <div className="space-y-3">
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1">Ativo OTC Selecionado</label>
+                    <label className="text-xs text-slate-400 block mb-1">Tipo de operação</label>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      {(["BINARIA", "DIGITAL"] as const).map(mode => (
+                        <button key={mode} type="button" onClick={() => setOptionMode(mode)}
+                          className={`rounded-xl border px-3 py-3 text-sm font-semibold ${optionMode === mode
+                            ? "border-purple-400 bg-purple-700/40 text-white"
+                            : "border-slate-700 bg-[#181d2a] text-slate-400"}`}>
+                          {mode === "BINARIA" ? "Binárias" : "Digitais"}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="text-xs text-slate-400 block mb-1">Ativo do gráfico (mesmo da corretora)</label>
                     <select
                       value={selectedAsset}
                       onChange={(e) => setSelectedAsset(e.target.value)}
                       className="w-full bg-[#181d2a] border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
                     >
-                      {POPULAR_OTC_ASSETS.map((asset) => (
-                        <option key={asset} value={asset}>{asset}</option>
-                      ))}
+                      <optgroup label="Pares OTC">
+                        {OTC_ASSETS.map(asset => <option key={asset} value={asset}>{asset}</option>)}
+                      </optgroup>
+                      <optgroup label="Pares convencionais">
+                        {REGULAR_ASSETS.map(asset => <option key={asset} value={asset}>{asset}</option>)}
+                      </optgroup>
                     </select>
                   </div>
 
@@ -741,12 +758,17 @@ export default function App() {
                     <label className="text-xs text-slate-400 block mb-1">Ou Ativo Personalizado</label>
                     <input
                       type="text"
-                      placeholder="Ex: NZD/USD OTC"
+                      placeholder="Outro ativo, exatamente como aparece na Safirion"
                       value={customAsset}
                       onChange={(e) => setCustomAsset(e.target.value)}
                       className="w-full bg-[#181d2a] border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
                     />
                   </div>
+
+                  <p className="text-[11px] leading-relaxed text-amber-200/90">
+                    A lista é para seleção manual, não confirma disponibilidade na Safirion. Abra o MESMO ativo e
+                    tipo de opção na corretora antes de iniciar o monitoramento. O app não realiza ordens.
+                  </p>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
