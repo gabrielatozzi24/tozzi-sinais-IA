@@ -1,0 +1,23 @@
+name: Tozzi - Testes e build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - name: Verificar robos
+        run: npm test
+      - name: Validar TypeScript
+        run: npm run lint
+      - name: Compilar interface
+        run: npm run build
