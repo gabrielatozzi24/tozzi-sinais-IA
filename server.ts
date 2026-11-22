@@ -313,7 +313,6 @@ Analise minuciosamente a imagem fornecida do gráfico:
           bots: {
             timing: { ...timing, name: "Tozzi Timing Bot" },
             trend: { ...trend, name: "Tozzi Trend Bot" },
-        candles,
             candles
           },
           ...analysisData
@@ -323,6 +322,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
       analysisData.bots = {
         timing: { ...timing, name: "Tozzi Timing Bot" },
         trend: { ...trend, name: "Tozzi Trend Bot" },
+        candles,
         vision: { name: "Tozzi Vision Bot", decision: vision.decision },
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
