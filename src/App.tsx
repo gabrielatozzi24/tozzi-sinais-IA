@@ -1512,6 +1512,16 @@ export default function App() {
               : "Horário previsto já alcançado"}</p>
           </div>
           <p className="my-3 text-xs text-slate-300">{candidate.reason}</p>
+          {(candidate.status === "CONFIRMED" || candidate.status === "CLOSED") && (
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <button type="button" onClick={() => { markSignalAction(candidate.targetEpoch, candidate.asset, "TAKEN"); setDismissedPopupKey(popupKey); }}
+                className={`rounded-xl px-3 py-3 text-xs font-extrabold ${currentSignal && wasTaken(currentSignal) ? "bg-purple-600 text-white ring-2 ring-purple-300" : "bg-green-700 text-white hover:bg-green-600"}`}>✓ PEGAR SINAL</button>
+              <button type="button" onClick={() => { markSignalAction(candidate.targetEpoch, candidate.asset, "IGNORED"); setDismissedPopupKey(popupKey); }}
+                className={`rounded-xl px-3 py-3 text-xs font-extrabold ${currentSignal?.tradeAction === "IGNORED" ? "bg-amber-500 text-black" : "bg-slate-700 text-white hover:bg-slate-600"}`}>✕ IGNORAR</button>
+            </div>
+          )}
+          {candidate.status === "PRE_ALERT" && <p className="mb-3 text-xs font-bold text-amber-300">Aguarde a reconfirmação. Ainda não é permitido pegar este sinal.</p>}
+          {["UNVERIFIED","CANCELLED","EXPIRED"].includes(candidate.status) && <p className="mb-3 text-xs font-bold text-amber-300">Sem confirmação: não pode ser marcado como operação.</p>}
           <button type="button" onClick={() => { setActiveTab("alerts"); setDismissedPopupKey(popupKey); }}
             className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 text-sm font-bold text-white p-3">
             Visualizar sinal
