@@ -172,6 +172,10 @@ Analise minuciosamente a imagem fornecida do gráfico:
           if (classifyGeminiError(primaryError) !== "OVERLOAD" ||
               !backupModel || backupModel === primaryModel) throw primaryError;
           // Backup is a single bounded attempt, not an endless retry.
+          const fallbackPermission = usageGate.consumeFallback();
+          if (!fallbackPermission.allowed) {
+            throw { status: 429, message: "Local rate limit: backup attempt skipped to protect API quota." };
+          }
           activeModel = backupModel;
           response = await ai.models.generateContent({ model: backupModel, ...generationRequest });
         }
