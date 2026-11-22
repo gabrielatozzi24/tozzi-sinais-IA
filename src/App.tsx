@@ -768,7 +768,7 @@ export default function App() {
                candidate.status === "UNVERIFIED" ? "⚠️ SEM CONFIRMAÇÃO — NÃO ENTRAR" :
                candidate.status === "EXPIRED" ? "🕒 PRÉ-ALERTA EXPIRADO" : "⛔ CANCELADO POR CONFLITO"}
             </p>
-            <div className={`text-sm font-bold ${candidate.decision === "POSSÍVEL COMPRA" ? "text-green-400" : "text-red-400"}`}>
+            <div className={`text-sm font-bold ${candidate.status === "CONFIRMED" || candidate.status === "CLOSED" ? (candidate.decision === "POSSÍVEL COMPRA" ? "text-green-400" : "text-red-400") : "text-amber-300"}`}>
               {candidate.decision} • {candidate.asset} • {candidate.timeframe} / {candidate.expiration}
             </div>
             <div className="text-xl font-bold text-white">
@@ -1460,8 +1460,9 @@ export default function App() {
                 candidate.status === "UNVERIFIED" ? "⚠️ SEM CONFIRMAÇÃO — NÃO ENTRAR" :
                 candidate.status === "EXPIRED" ? "🕒 PRÉ-ALERTA EXPIRADO" : "⛔ CANCELADO POR CONFLITO"}
             </p>
-            <p className={`mt-2 rounded-lg border px-3 py-2 text-xl font-extrabold ${candidate.decision === "POSSÍVEL COMPRA" ?
-              "border-green-500/60 bg-green-500/20 text-green-300" : "border-red-500/60 bg-red-500/20 text-red-300"}`}>{candidate.decision}</p>
+            <p className={`mt-2 rounded-lg border px-3 py-2 text-xl font-extrabold ${candidate.status === "CONFIRMED" || candidate.status === "CLOSED" ?
+              (candidate.decision === "POSSÍVEL COMPRA" ? "border-green-500/60 bg-green-500/20 text-green-300" : "border-red-500/60 bg-red-500/20 text-red-300")
+              : "border-amber-500/60 bg-amber-500/15 text-amber-300"}`}>{candidate.decision}</p>
             <p className="text-xs">{candidate.asset} · {candidate.timeframe} · Exp. {candidate.expiration}</p>
             <p className="mt-2 text-base font-semibold">Entrada prevista: {formatEntryTime(candidate.targetEpoch)}</p>
             <p className="text-xs mt-1">{candidate.targetEpoch > nowEpoch
