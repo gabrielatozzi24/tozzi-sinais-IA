@@ -167,6 +167,7 @@ export default function App() {
   const sessionRef = useRef(0);
   const activeRequestRef = useRef<AbortController | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [providerAttempts, setProviderAttempts] = useState<{model:string;status:number|null;kind:string;elapsedMs:number}[]>([]);
   const [aiDiagnostic, setAiDiagnostic] = useState<any>(null);
   const [aiDiagnosticBusy, setAiDiagnosticBusy] = useState(false);
   const runAiDiagnostic = async () => {
@@ -553,6 +554,7 @@ export default function App() {
       setApiCallCount(v => v + 1);
       if (!res.ok) {
         const details = await res.json().catch(() => ({}));
+        setProviderAttempts(Array.isArray(details.attempts) ? details.attempts : []);
         if ((res.status === 429 || res.status === 503) &&
           ["GEMINI_QUOTA", "GEMINI_UNAVAILABLE", "API_RATE_LIMIT", "ANALYSIS_BUSY"].includes(details?.type)) {
           const retrySeconds = Math.max(1, Math.min(1800, Number(details.retryAfterSeconds) || 60));
@@ -584,6 +586,7 @@ export default function App() {
       setExtraBots(data.bots || null);
       setCurrentGuardResult({ ...guard, passed: allowed, finalDecision: allowed ? direction : "AGUARDAR", guardReason: reason });
       setAnalysisError(null);
+      setProviderAttempts([]);
       overloadUntilRef.current = 0;
       setOverloadUntil(0);
       if (phase === "PREPARE") {
@@ -1271,6 +1274,17 @@ export default function App() {
                   </div>
 
                   {analysisError && <p className="mb-2 text-xs text-amber-300">Falha técnica: {analysisError}</p>}
+                  {providerAttempts.length > 0 && (
+                    <div className="mb-2 rounded-lg border border-slate-600 bg-[#131827] p-3 text-xs text-slate-300" role="status">
+                      <strong>Resultado da análise real da imagem:</strong>
+                      {providerAttempts.map((attempt,i)=>(
+                        <p key={i} className={attempt.status===200 ? "mt-1 text-green-300":"mt-1 text-amber-200"}>
+                          {attempt.model}: {attempt.status===200?"OK":"Erro "+(attempt.status??"?")} · {attempt.kind} · {attempt.elapsedMs}ms
+                        </p>
+                      ))}
+                      <p className="mt-1 text-[11px] text-slate-400">Diagnóstico sem credenciais. Falha técnica não é LOSS e não gera sinal confirmado.</p>
+                    </div>
+                  )}
                   {overloadUntil > nowEpoch && <p className="mb-2 text-xs text-amber-200">
                     Gemini temporariamente indisponível. As análises estão suspensas por segurança. Nova tentativa automática em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos. Não é necessário atualizar a página.
                   </p>}
