@@ -33,6 +33,8 @@ const PORT = Number(process.env.PORT) || 3000;
 const usageGate = new ApiUsageGate(8);
 let geminiOverloadStreak = 0;
 let geminiQuotaStreak = 0;
+// Keep an overloaded primary on a cooldown rather than retrying it each candle.
+let primaryOverloadedUntil = 0;
 
 
 async function startServer() {
@@ -129,8 +131,9 @@ Analise minuciosamente a imagem fornecida do gráfico:
           usage: usageGate.stats()
         });
       }
-      const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
+      // Default to a separate lighter model first; configured Render variables still take priority.
+      const primaryModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
       const generationRequest = {
         contents: [
           {
@@ -199,16 +202,24 @@ Analise minuciosamente a imagem fornecida do gráfico:
       let response;
       let activeModel = primaryModel;
       try {
+        const cooldownActive = Date.now() < primaryOverloadedUntil &&
+          backupModel && backupModel !== primaryModel;
+        // After a genuine 503, briefly prefer the backup instead of repeatedly
+        // hitting a known-overloaded model and wasting two calls per candle.
+        activeModel = cooldownActive ? backupModel : primaryModel;
         try {
-          response = await ai.models.generateContent({ model: primaryModel, ...generationRequest });
+          response = await ai.models.generateContent({ model: activeModel, ...generationRequest });
+          if (activeModel === primaryModel) primaryOverloadedUntil = 0;
         } catch (primaryError: any) {
-          // A quota error is project-wide: switching model immediately only wastes requests.
-          if (classifyGeminiError(primaryError) !== "OVERLOAD" ||
+          const kind = classifyGeminiError(primaryError);
+          if (kind === "OVERLOAD" && activeModel === primaryModel)
+            primaryOverloadedUntil = Date.now() + 15 * 60_000;
+          // Never fail over on 429 quotas, auth failures, or while already using backup.
+          if (kind !== "OVERLOAD" || activeModel !== primaryModel ||
               !backupModel || backupModel === primaryModel) throw primaryError;
-          // Backup is a single bounded attempt, not an endless retry.
           const fallbackPermission = usageGate.consumeFallback();
           if (!fallbackPermission.allowed) {
-            throw { status: 429, message: "Local rate limit: backup attempt skipped to protect API quota." };
+            throw { status: 429, message: "Limite local: fallback não iniciado para preservar cota." };
           }
           activeModel = backupModel;
           response = await ai.models.generateContent({ model: backupModel, ...generationRequest });
@@ -380,7 +391,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
           ? Math.min(900, 120 * (2 ** Math.min(4, geminiQuotaStreak - 1)))
           : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
         usageGate.pause(retryAfterSeconds);
-        console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.");
+        console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
+          process.env.GEMINI_MODEL || "gemini-3.1-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite");
         return res.status(kind === "QUOTA" ? 429 : 503)
           .set("Retry-After", String(retryAfterSeconds)).json({
             error: kind === "QUOTA"
