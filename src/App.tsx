@@ -171,7 +171,7 @@ export default function App() {
   );
   // One alert identity throughout PRE_ALERT -> CONFIRMED -> CLOSED.
   // Marking or dismissing a signal must never reopen the same notification.
-  const popupKey = candidate ? `${candidate.targetEpoch}-${candidate.asset}-${candidate.decision}` : "";
+  const popupKey = candidate ? `${candidate.targetEpoch}-${candidate.asset}-${candidate.decision}-${candidate.status === "PRE_ALERT" ? "PRE_ALERT" : "FINAL"}` : "";
   const popupVisible = Boolean(candidate) && popupKey !== dismissedPopupKey;
   const enableBrowserNotifications = async () => {
     if (!("Notification" in window)) { setBrowserNotifications("unsupported"); return; }
