@@ -946,7 +946,13 @@ export default function App() {
             <p className="mt-1 text-[11px] text-slate-400">{historyStats.rated} operações marcadas manualmente</p>
           </div>
         </section>
-        {activeTab === "monitor" && <SafirionConnection />}
+        {activeTab === "monitor" && <SafirionConnection
+          candidate={candidate}
+          selectedAsset={customAsset || selectedAsset}
+          optionMode={optionMode}
+          isMonitoring={isMonitoring && !isPaused}
+          onDemoOrder={(targetEpoch,asset)=>markSignalAction(targetEpoch,asset,"TAKEN")}
+        />}
         {activeTab === "monitor" && (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 lg:gap-6">
             {/* Left Column: Configuration & Live Controls */}
