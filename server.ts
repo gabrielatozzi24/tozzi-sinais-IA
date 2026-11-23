@@ -32,7 +32,7 @@ async function groqGenerate(model: string, input: GroqRequest): Promise<{ text: 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: 0, response_format: { type: "json_object" }, max_completion_tokens: 1800 }),
+    body: JSON.stringify({ model, messages, temperature: 0, response_format: { type: "json_object" }, max_completion_tokens: 900 }),
     signal: AbortSignal.timeout(25000)
   });
   if (!response.ok) {
@@ -55,23 +55,25 @@ const PORT = Number(process.env.PORT) || 3000;
 const usageGate = new ApiUsageGate(8);
 // Conservative global server-side allowance for the vision model's free tier.
 // Each image requires ~2048 input tokens plus a variable prompt and completion.
-const FREE_GROQ_REQUEST_INTERVAL_MS = 70_000;
+const FREE_GROQ_MAX_REQUESTS_PER_MINUTE = 2;
 const FREE_GROQ_MAX_DAILY_REQUESTS = 40;
-let groqNextRequestAt = 0;
+const groqMinuteRequests: number[] = [];
 let groqDailyCount = 0;
 let groqDailyDate = "";
 function groqBudget(now = Date.now()) {
   const today = new Date(now).toISOString().slice(0,10);
   if (groqDailyDate !== today) { groqDailyDate = today; groqDailyCount = 0; }
+  while (groqMinuteRequests.length && now - groqMinuteRequests[0] >= 60_000) groqMinuteRequests.shift();
   if (groqDailyCount >= FREE_GROQ_MAX_DAILY_REQUESTS) {
     return { allowed:false, retryAfterSeconds:Math.max(1,Math.ceil((Date.parse(today+"T00:00:00Z")+86400000-now)/1000)), reason:"daily" };
   }
-  if (now < groqNextRequestAt) return { allowed:false, retryAfterSeconds:Math.ceil((groqNextRequestAt-now)/1000), reason:"minute" };
+  if (groqMinuteRequests.length >= FREE_GROQ_MAX_REQUESTS_PER_MINUTE)
+    return { allowed:false, retryAfterSeconds:Math.max(1, Math.ceil((groqMinuteRequests[0]+60_000-now)/1000)), reason:"minute" };
   return { allowed:true, retryAfterSeconds:0, reason:"ok" };
 }
 function countGroqRequest(now = Date.now()) {
   groqDailyCount++;
-  groqNextRequestAt = now + FREE_GROQ_REQUEST_INTERVAL_MS;
+  groqMinuteRequests.push(now);
 }
 let groqOverloadStreak = 0;
 let groqQuotaStreak = 0;
