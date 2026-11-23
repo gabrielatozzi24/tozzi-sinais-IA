@@ -951,6 +951,7 @@ export default function App() {
           selectedAsset={customAsset || selectedAsset}
           optionMode={optionMode}
           isMonitoring={isMonitoring && !isPaused}
+          currentTradeAction={currentSignal?.tradeAction}
           onDemoOrder={(targetEpoch,asset)=>markSignalAction(targetEpoch,asset,"TAKEN")}
         />}
         {activeTab === "monitor" && (
