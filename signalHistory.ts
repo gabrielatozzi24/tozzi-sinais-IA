@@ -91,3 +91,43 @@ export function summarizeSignals(items: SignalRecord[]) {
     winRate: rated.length ? (wins / rated.length * 100).toFixed(1) : null
   };
 }
+
+/** Outcome-only comparisons. Historical records without optionMode remain unknown,
+ * rather than being silently counted as binary options. */
+export type ComparisonRow = {
+  key: string; label: string; wins: number; losses: number;
+  rated: number; winRate: number | null;
+};
+const isRatedTrade = (s: SignalRecord) =>
+  canRecordOutcome(s) && (s.result === "WIN" || s.result === "LOSS");
+const isOtcAsset = (asset: string) => /(?:^|[\\s/_-])OTC(?:$|[\\s/_-])/i.test(asset.trim());
+export function summarizeComparisons(items: SignalRecord[]) {
+  const rated = items.filter(isRatedTrade);
+  const modeOf = (s: SignalRecord) =>
+    s.optionMode === "BINARIA" ? "BINARIA" : s.optionMode === "DIGITAL" ? "DIGITAL" : "UNKNOWN";
+  const marketOf = (s: SignalRecord) => isOtcAsset(s.asset) ? "OTC" : "REGULAR";
+  const summarize = (key: string, label: string, selected: SignalRecord[]): ComparisonRow => {
+    const wins=selected.filter(s=>s.result==="WIN").length;
+    const losses=selected.length-wins;
+    return {key,label,wins,losses,rated:selected.length,
+      winRate:selected.length ? Math.round((wins/selected.length)*1000)/10 : null};
+  };
+  const markets = [
+    summarize("OTC","Mercado OTC",rated.filter(s=>marketOf(s)==="OTC")),
+    summarize("REGULAR","Mercado normal",rated.filter(s=>marketOf(s)==="REGULAR"))
+  ];
+  const modes = [
+    summarize("BINARIA","Binárias",rated.filter(s=>modeOf(s)==="BINARIA")),
+    summarize("DIGITAL","Digitais",rated.filter(s=>modeOf(s)==="DIGITAL")),
+    summarize("UNKNOWN","Tipo não informado",rated.filter(s=>modeOf(s)==="UNKNOWN"))
+  ];
+  const combinations = [
+    ...(["OTC","REGULAR"] as const).flatMap(market =>
+      (["BINARIA","DIGITAL"] as const).map(mode =>
+        summarize(market+"_"+mode,
+          (market==="OTC"?"OTC":"Normal")+" • "+(mode==="BINARIA"?"Binárias":"Digitais"),
+          rated.filter(s=>marketOf(s)===market && modeOf(s)===mode)))),
+    summarize("UNKNOWN_MODE","Tipo não informado",rated.filter(s=>modeOf(s)==="UNKNOWN"))
+  ];
+  return {markets,modes,combinations,operations:rated.length};
+}
