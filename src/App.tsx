@@ -545,6 +545,8 @@ export default function App() {
           const retrySeconds = Math.max(1, Math.min(1800, Number(details.retryAfterSeconds) || 60));
           overloadUntilRef.current = Date.now() + retrySeconds * 1000;
           setOverloadUntil(overloadUntilRef.current);
+          // The previous technical failure must not leave a misleading "analyzing" badge.
+          setIsAnalyzing(false);
           throw new Error(details.error || "Controle de consultas ativo. Aguardando próxima tentativa.");
         }
         throw new Error(details?.error || "Erro HTTP " + res.status);
@@ -1181,12 +1183,16 @@ export default function App() {
                     </div>
                   )}
 
-                  {isAnalyzing && (
+                  {overloadUntil > nowEpoch ? (
+                    <div role="status" className="absolute bottom-3 right-3 rounded-xl border border-amber-500/50 bg-black/85 px-3 py-2 text-xs font-bold text-amber-200">
+                      IA em pausa por indisponibilidade · {Math.ceil((overloadUntil-nowEpoch)/1000)}s
+                    </div>
+                  ) : isAnalyzing ? (
                     <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl border border-purple-500/40 flex items-center space-x-2 text-purple-300 text-xs">
                       <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-400" />
                       <span>Vision Bot Analisando...</span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -1253,7 +1259,7 @@ export default function App() {
 
                   {analysisError && <p className="mb-2 text-xs text-amber-300">Falha técnica: {analysisError}</p>}
                   {overloadUntil > nowEpoch && <p className="mb-2 text-xs text-amber-200">
-                    API em pausa automática. Nova tentativa em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos.
+                    Gemini temporariamente indisponível. As análises estão suspensas por segurança. Nova tentativa automática em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos. Não é necessário atualizar a página.
                   </p>}
                   {currentGuardResult?.technicalError ? (
                     <p className="text-xs text-amber-300 rounded-xl bg-amber-950/20 p-3">
