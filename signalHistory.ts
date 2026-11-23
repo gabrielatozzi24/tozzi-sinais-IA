@@ -100,7 +100,7 @@ export type ComparisonRow = {
 };
 const isRatedTrade = (s: SignalRecord) =>
   canRecordOutcome(s) && (s.result === "WIN" || s.result === "LOSS");
-const isOtcAsset = (asset: string) => /(?:^|[\\s/_-])OTC(?:$|[\\s/_-])/i.test(asset.trim());
+const isOtcAsset = (asset: string) => /(?:^|[\s/_-])OTC(?:$|[\s/_-])/i.test(asset.trim());
 export function summarizeComparisons(items: SignalRecord[]) {
   const rated = items.filter(isRatedTrade);
   const modeOf = (s: SignalRecord) =>
