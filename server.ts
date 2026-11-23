@@ -81,7 +81,7 @@ async function startServer() {
     }
     lastAiCheckAt = now;
     const main = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
+    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash";
     const configuredByRender = { primary: Boolean(process.env.GEMINI_MODEL), backup: Boolean(process.env.GEMINI_FALLBACK_MODEL) };
     const models = [...new Set([main,backup])];
     const results: { model:string; ok:boolean; status:number|null; kind:string; elapsedMs:number }[] = [];
@@ -176,7 +176,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
       }
       // Prioritize the model verified responsive in user diagnostics (text-only test); Render overrides still take priority.
       const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
+      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash";
       const generationRequest = {
         contents: [
           {
@@ -435,7 +435,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
           : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
         usageGate.pause(retryAfterSeconds);
         console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
-          process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite");
+          process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash");
         return res.status(kind === "QUOTA" ? 429 : 503)
           .set("Retry-After", String(retryAfterSeconds)).json({
             error: kind === "QUOTA"
