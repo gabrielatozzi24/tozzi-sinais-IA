@@ -22,6 +22,11 @@ export interface SignalRecord {
   result?: SignalOutcome;
   tradeAction?: SignalAction; // undefined = ainda não classificado; WIN/LOSS antigos implicam operação registrada
   confirmedReason?: string; // conserva o motivo real ao encerrar a janela
+  candleBodyStrength?: string;
+  opposingWickPressure?: string;
+  reversalEvidence?: string;
+  structureContinuation?: string;
+  finalCandleRiskCode?: string;
   stages?: { status: SignalStatus; at: string; reason: string }[];
 }
 
@@ -48,6 +53,11 @@ export function upsertSignal(history: SignalRecord[], incoming: SignalRecord, ma
     result: old.result === "WIN" || old.result === "LOSS" ? old.result : incoming.result,
     tradeAction: old.tradeAction ?? incoming.tradeAction,
     confirmedReason: incoming.status === "CONFIRMED" ? incoming.reason : old.confirmedReason,
+    candleBodyStrength: incoming.candleBodyStrength ?? old.candleBodyStrength,
+    opposingWickPressure: incoming.opposingWickPressure ?? old.opposingWickPressure,
+    reversalEvidence: incoming.reversalEvidence ?? old.reversalEvidence,
+    structureContinuation: incoming.structureContinuation ?? old.structureContinuation,
+    finalCandleRiskCode: incoming.finalCandleRiskCode ?? old.finalCandleRiskCode,
     stages,
     // A confirmed signal must not become "unconfirmed" merely due to an old message.
     status: old.status === "CLOSED" && incoming.status === "PRE_ALERT" ? old.status : incoming.status
