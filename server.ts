@@ -80,8 +80,8 @@ async function startServer() {
       return res.status(429).json({ error: "Aguarde 2 minutos antes de repetir o diagnóstico.", retryAfterSeconds: Math.ceil((120_000-(now-lastAiCheckAt))/1000) });
     }
     lastAiCheckAt = now;
-    const main = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
-    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
+    const main = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
     const configuredByRender = { primary: Boolean(process.env.GEMINI_MODEL), backup: Boolean(process.env.GEMINI_FALLBACK_MODEL) };
     const models = [...new Set([main,backup])];
     const results: { model:string; ok:boolean; status:number|null; kind:string; elapsedMs:number }[] = [];
@@ -174,9 +174,9 @@ Analise minuciosamente a imagem fornecida do gráfico:
           usage: usageGate.stats()
         });
       }
-      // Default to a separate lighter model first; configured Render variables still take priority.
-      const primaryModel = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
-      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
+      // Prioritize the model verified responsive in user diagnostics (text-only test); Render overrides still take priority.
+      const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite";
       const generationRequest = {
         contents: [
           {
@@ -435,7 +435,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
           : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
         usageGate.pause(retryAfterSeconds);
         console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
-          process.env.GEMINI_MODEL || "gemini-3.1-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite");
+          process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.1-flash-lite");
         return res.status(kind === "QUOTA" ? 429 : 503)
           .set("Retry-After", String(retryAfterSeconds)).json({
             error: kind === "QUOTA"
