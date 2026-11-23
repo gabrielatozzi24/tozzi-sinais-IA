@@ -16,6 +16,7 @@ type Props={
   selectedAsset:string;
   optionMode:"BINARIA"|"DIGITAL";
   isMonitoring:boolean;
+  currentTradeAction?:"TAKEN"|"IGNORED";
   onDemoOrder:(targetEpoch:number,asset:string)=>void;
 };
 function makeOAuth() {
@@ -26,7 +27,7 @@ function makeOAuth() {
 }
 function localDay(){return new Date().toLocaleDateString("en-CA");}
 
-export default function SafirionConnection({candidate,selectedAsset,optionMode,isMonitoring,onDemoOrder}:Props) {
+export default function SafirionConnection({candidate,selectedAsset,optionMode,isMonitoring,currentTradeAction,onDemoOrder}:Props) {
   const [status,setStatus]=useState<Status>("IDLE");
   const [details,setDetails]=useState("Autorize sua conta para testar conexão com a API da Safirion.");
   const [activeCount,setActiveCount]=useState<number|null>(null);
@@ -161,6 +162,8 @@ export default function SafirionConnection({candidate,selectedAsset,optionMode,i
       const rejected=canSendDemoOrder(candidate,now,optionMode,selectedAsset,true);
       if(rejected)return;
       if(!candidate)return;
+      // A manual choice takes precedence: never trade a signal the user took or ignored.
+      if(currentTradeAction==="TAKEN"||currentTradeAction==="IGNORED")return;
       const key=`${candidate.asset}|${candidate.targetEpoch}|${candidate.optionMode}`;
       if(attemptsRef.current.has(key))return;
       // Lock BEFORE any asynchronous SDK call; never retry an ambiguous order.
@@ -221,7 +224,7 @@ export default function SafirionConnection({candidate,selectedAsset,optionMode,i
       })();
     },200);
     return()=>clearInterval(ticker);
-  },[candidate,selectedAsset,optionMode,stake,dailyLimit,sessionDay,onDemoOrder]);
+  },[candidate,selectedAsset,optionMode,stake,dailyLimit,sessionDay,currentTradeAction,onDemoOrder]);
 
   return (
     <section className="rounded-2xl border border-purple-500/30 bg-[#131729] p-4 sm:p-5 space-y-3">
@@ -275,6 +278,9 @@ export default function SafirionConnection({candidate,selectedAsset,optionMode,i
             onClick={()=>{
               if(status!=="CONNECTED"||!sdkRef.current||!connectionRef.current||!isMonitoring)return;
               if(!validateDemoStake(stake,10,10))return;
+              // Do not trade a confirmation that already existed before the arm click.
+              if(candidate?.status==="CONFIRMED")
+                attemptsRef.current.add(`${candidate.asset}|${candidate.targetEpoch}|${candidate.optionMode}`);
               setAutoEnabled(true);armedRef.current=true;
               setDetails("Automação DEMO ativada. Aguardando um NOVO sinal confirmado; nenhuma operação na conta real.");
             }}
