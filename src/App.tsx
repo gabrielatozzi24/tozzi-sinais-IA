@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { SignalRecord, SignalStatus, signalKey, upsertSignal, summarizeSignals, isConfirmed, historyGroup, wasTaken, canRecordOutcome } from "../signalHistory.js";
+import { SignalRecord, SignalStatus, signalKey, upsertSignal, summarizeSignals, summarizeComparisons, isConfirmed, historyGroup, wasTaken, canRecordOutcome } from "../signalHistory.js";
 import {
   Activity,
   Play,
@@ -655,6 +655,7 @@ export default function App() {
   };
   const visibleHistory = signalsHistory.filter(item => historyView === "ALL" || historyGroup(item) === historyView);
   const historyStats = summarizeSignals(signalsHistory);
+  const comparisons = summarizeComparisons(signalsHistory);
   const winRate = historyStats.winRate;
   const formatRecordDate = (iso: string) =>
     new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
@@ -1376,6 +1377,48 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            <section className="space-y-4 rounded-2xl border border-purple-500/25 bg-[#121620] p-4 sm:p-5" aria-label="Comparativo de desempenho">
+              <div>
+                <h3 className="text-base font-bold text-white">Comparativo por mercado e tipo de opção</h3>
+                <p className="mt-1 text-xs text-slate-400">
+                  Somente operações confirmadas, marcadas como PEGUEI e com WIN/LOSS informado. Sinais ignorados e sem confirmação não entram nas taxas.
+                  Os resultados antigos permanecem salvos neste navegador.
+                </p>
+              </div>
+              {([
+                { title: "Mercado", rows: comparisons.markets },
+                { title: "Tipo de opção", rows: comparisons.modes },
+                { title: "Combinações", rows: comparisons.combinations }
+              ]).map(group => (
+                <div key={group.title} className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wide text-purple-300">{group.title}</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+                    {group.rows.map(row => (
+                      <div key={row.key} className="rounded-xl border border-white/10 bg-[#191e2e] p-3 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <strong className="text-xs text-slate-100">{row.label}</strong>
+                          <span className="text-[11px] font-bold text-slate-200">{row.winRate === null ? "Sem resultados" : row.winRate.toFixed(1).replace(".", ",") + "% WIN"}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          <span className="text-green-300">{row.wins} WIN</span>
+                          {" · "}
+                          <span className="text-red-300">{row.losses} LOSS</span>
+                          {" · "}{row.rated} operações
+                        </p>
+                        <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
+                          <div className="h-full bg-green-500" style={{width: (row.winRate ?? 0) + "%"}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <p className="text-[11px] text-amber-200/80">
+                Taxas descritivas, não previsões. Amostras pequenas não demonstram vantagem.
+                Registros antigos sem tipo identificado aparecem como “Tipo não informado”; o mercado é inferido pelo nome OTC do ativo.
+              </p>
+            </section>
 
             <div className="flex flex-wrap gap-2 rounded-2xl bg-[#121620] p-3 border border-slate-800" role="group" aria-label="Filtrar histórico de sinais">
               {([{value:"CONFIRMED",label:"✅ Confirmados"}, {value:"UNCONFIRMED",label:"⚠️ Sem confirmação"}, {value:"ALL",label:"Todos"}] as const).map(filter => (
