@@ -1277,7 +1277,7 @@ export default function App() {
                   {currentGuardResult?.technicalError && (
                     <div className="mb-3 rounded-xl border border-purple-500/40 bg-[#17172b] p-3 space-y-2">
                       <p className="text-xs text-slate-300">Erro recorrente? Verifique quais modelos estão configurados no Render, sem compartilhar sua chave.</p>
-                      <button type="button" onClick={() => { void runAiDiagnostic(); }} disabled={aiDiagnosticBusy || overloadUntil>nowEpoch}
+                      <button type="button" onClick={() => { void runAiDiagnostic(); }} disabled={aiDiagnosticBusy}
                         className="rounded-lg bg-purple-700 disabled:opacity-50 px-3 py-2 text-xs font-bold text-white">
                         {aiDiagnosticBusy?"Verificando...":"DIAGNOSTICAR GEMINI"}
                       </button>
