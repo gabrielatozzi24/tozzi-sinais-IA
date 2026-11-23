@@ -100,6 +100,8 @@ export default function App() {
   const recordSignal = (data: {
     targetEpoch: number; asset: string; timeframe: string; expiration: string; optionMode?: string;
     decision: SignalRecord["decision"]; status: SignalStatus; reason: string; latencyMs?: number;
+    candleBodyStrength?: string; opposingWickPressure?: string; reversalEvidence?: string;
+    structureContinuation?: string; finalCandleRiskCode?: string;
   }) => {
     const at = new Date().toISOString();
     const key = signalKey(data);
@@ -110,6 +112,11 @@ export default function App() {
       decision: data.decision, reason: data.reason, guardReason: data.reason,
       guardPassed: data.status === "CONFIRMED" || data.status === "CLOSED",
       latencyMs: data.latencyMs || 0, status: data.status, result: "PENDENTE",
+      candleBodyStrength: data.candleBodyStrength,
+      opposingWickPressure: data.opposingWickPressure,
+      reversalEvidence: data.reversalEvidence,
+      structureContinuation: data.structureContinuation,
+      finalCandleRiskCode: data.finalCandleRiskCode,
       stages: [{ status: data.status, at, reason: data.reason }]
     };
     setSignalsHistory(previous => upsertSignal(previous, incoming));
@@ -162,7 +169,10 @@ export default function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const overloadUntilRef = useRef(0);
   const [overloadUntil, setOverloadUntil] = useState(0);
-  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; optionMode?: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "UNVERIFIED"; reason: string };
+  type Candidate = { targetEpoch: number; decision: "POSSÍVEL COMPRA" | "POSSÍVEL VENDA"; asset: string; timeframe: string; expiration: string; optionMode?: string; status: "PRE_ALERT" | "CONFIRMED" | "CANCELLED" | "EXPIRED" | "CLOSED" | "UNVERIFIED"; reason: string; diagnostics?: {
+    candleBodyStrength?:string; opposingWickPressure?:string; reversalEvidence?:string;
+    structureContinuation?:string; finalCandleRiskCode?:string; latencyMs?:number;
+  } };
   const candidateRef = useRef<Candidate | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [dismissedPopupKey, setDismissedPopupKey] = useState("");
@@ -208,7 +218,8 @@ export default function App() {
       recordSignal({
         targetEpoch: next.targetEpoch, asset: next.asset, timeframe: next.timeframe,
         expiration: next.expiration, optionMode: next.optionMode || optionMode, decision: next.decision,
-        status: next.status, reason: next.reason
+        status: next.status, reason: next.reason,
+        ...next.diagnostics
       });
       if (previous?.status !== next.status) notifyBrowser(next);
     }
@@ -566,12 +577,22 @@ export default function App() {
             targetEpoch, asset: customAsset || selectedAsset, timeframe: selectedTimeframe,
             expiration: selectedExpiration, optionMode,
             decision: direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA" ? direction : "AGUARDAR",
-            status: "AGUARDAR", reason, latencyMs
+            status: "AGUARDAR", reason, latencyMs,
+            candleBodyStrength: data.visionResult?.candleBodyStrength,
+            opposingWickPressure: data.visionResult?.opposingWickPressure,
+            reversalEvidence: data.visionResult?.reversalEvidence,
+            structureContinuation: data.visionResult?.structureContinuation,
+            finalCandleRiskCode: data.bots?.finalCandleRisk?.code
           });
         }
         if (allowed) {
           const next: Candidate = { targetEpoch, decision: direction, asset: customAsset || selectedAsset,
             timeframe: selectedTimeframe, expiration: selectedExpiration, optionMode, status: "PRE_ALERT",
+            diagnostics: { latencyMs, candleBodyStrength: data.visionResult?.candleBodyStrength,
+              opposingWickPressure: data.visionResult?.opposingWickPressure,
+              reversalEvidence: data.visionResult?.reversalEvidence,
+              structureContinuation: data.visionResult?.structureContinuation,
+              finalCandleRiskCode: data.bots?.finalCandleRisk?.code },
             reason: "Possível " + (direction === "POSSÍVEL COMPRA" ? "COMPRA" : "VENDA") +
               " às " + formatEntryTime(targetEpoch) + ". NÃO ENTRE ainda; aguardando reconfirmação." };
           setCandidateSafe(next);
@@ -580,7 +601,12 @@ export default function App() {
       } else {
         const previous = candidateRef.current;
         if (previous && previous.targetEpoch === targetEpoch) {
-          const next: Candidate = { ...previous, status: allowed ? "CONFIRMED" :
+          const next: Candidate = { ...previous, diagnostics: { latencyMs,
+              candleBodyStrength: data.visionResult?.candleBodyStrength,
+              opposingWickPressure: data.visionResult?.opposingWickPressure,
+              reversalEvidence: data.visionResult?.reversalEvidence,
+              structureContinuation: data.visionResult?.structureContinuation,
+              finalCandleRiskCode: data.bots?.finalCandleRisk?.code }, status: allowed ? "CONFIRMED" :
               data.phaseEvent === "CANCELLED" ? "CANCELLED" : "UNVERIFIED",
             reason: allowed ? "Condições reconfirmadas. Entrada prevista: " + formatEntryTime(targetEpoch) +
               ". Confira novamente o gráfico antes de qualquer operação."
@@ -681,7 +707,8 @@ export default function App() {
     new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
   const exportHistoryCSV = () => {
     const cols = ["timestamp","updatedAt","asset","optionMode","timeframe","expiration",
-      "decision","status","reason","guardPassed","latencyMs","tradeAction","result","targetEpoch","confirmedReason"];
+      "decision","status","reason","guardPassed","latencyMs","tradeAction","result","targetEpoch","confirmedReason",
+      "candleBodyStrength","opposingWickPressure","reversalEvidence","structureContinuation","finalCandleRiskCode"];
     const cell = (value: unknown) => {
       const str = String(value ?? "");
       // Neutralize spreadsheet formulas in exported user/model text.
