@@ -71,6 +71,49 @@ async function startServer() {
     next();
   });
 
+  // Authenticated, explicitly user-triggered lightweight service diagnostic.
+  // Does not use market data or create trading signals. Never returns API keys.
+  let lastAiCheckAt = 0;
+  app.post("/api/ai-diagnostic", async (_req, res) => {
+    const now = Date.now();
+    if (now - lastAiCheckAt < 120_000) {
+      return res.status(429).json({ error: "Aguarde 2 minutos antes de repetir o diagnóstico.", retryAfterSeconds: Math.ceil((120_000-(now-lastAiCheckAt))/1000) });
+    }
+    lastAiCheckAt = now;
+    const main = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
+    const configuredByRender = { primary: Boolean(process.env.GEMINI_MODEL), backup: Boolean(process.env.GEMINI_FALLBACK_MODEL) };
+    const models = [...new Set([main,backup])];
+    const results: { model:string; ok:boolean; status:number|null; kind:string; elapsedMs:number }[] = [];
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ configuredByRender, models, keyConfigured:false, results, error:"GEMINI_API_KEY ausente no servidor." });
+    }
+    const admission = usageGate.acquire();
+    if (!admission.allowed) return res.status(429).json({
+      configuredByRender, models, keyConfigured:true,
+      error:"API em pausa ou ocupada. O diagnóstico não iniciou chamadas extras.",
+      retryAfterSeconds:admission.retryAfterSeconds
+    });
+    try {
+      for (const model of models) {
+        if (results.length && usageGate.consumeFallback().allowed === false) break;
+        const started=Date.now();
+        try {
+          await ai.models.generateContent({ model, contents:"Responda somente OK.", config:{maxOutputTokens:12} });
+          results.push({model,ok:true,status:200,kind:"OK",elapsedMs:Date.now()-started});
+        } catch(err:any) {
+          const parsed=Number(err?.status||err?.code);
+          results.push({model,ok:false,status:Number.isFinite(parsed)&&parsed>0?parsed:null,
+            kind:classifyGeminiError(err),elapsedMs:Date.now()-started});
+        }
+      }
+    } finally {usageGate.release();}
+    return res.json({
+      configuredByRender,models,keyConfigured:true,results,
+      note:"Teste de texto simples; imagem, JSON estruturado e capacidade em produção precisam de verificação separada."
+    });
+  });
+
   // API endpoint for Tozzi Vision Bot & Signal Guard chart analysis
   app.post("/api/analyze-chart", async (req, res) => {
     const requestStartedAt = Date.now();
