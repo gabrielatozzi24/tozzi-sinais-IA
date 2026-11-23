@@ -74,6 +74,7 @@ async function startServer() {
     try {
       const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp, optionMode } = req.body;
       const marketMode = optionMode === "DIGITAL" ? "DIGITAL" : "BINARIA";
+      const chartMarket = /\\bOTC\\b/i.test(String(selectedAsset || "")) ? "OTC" : "REGULAR";
       const stage = phase === "CONFIRM" ? "CONFIRM" : "PREPARE";
       const target = Number(targetEpoch);
       const remainingBefore = target - Date.now();
@@ -99,11 +100,11 @@ async function startServer() {
       const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
       const systemPrompt = `
-Você é o "Tozzi Vision Bot" e o "Tozzi Signal Guard", robôs especialistas em análise visual de gráficos OTC (opções binárias / Safirion).
-O usuário selecionou o ativo: "${selectedAsset || "EUR/USD OTC"}", tipo de opção "${marketMode === "DIGITAL" ? "Digital" : "Binária"}", no período: "${selectedTimeframe || "M1"}" com expiração de: "${selectedExpiration || "1min"}". A seleção é manual e NÃO garante que esse mercado esteja aberto ou que o tipo de opção seja verificável na captura.
+Você é o "Tozzi Vision Bot" e o "Tozzi Signal Guard", verificadores de análise visual de gráficos de opções binárias/digitais (Safirion), podendo ser mercado OTC ou mercado normal. Não presuma que um gráfico regular é OTC.
+O usuário selecionou o ativo: "${selectedAsset || "EUR/USD OTC"}", mercado "${chartMarket === "OTC" ? "OTC" : "NORMAL (não OTC)"}", tipo de opção "${marketMode === "DIGITAL" ? "Digital" : "Binária"}", no período: "${selectedTimeframe || "M1"}" com expiração de: "${selectedExpiration || "1min"}". A seleção é manual e NÃO garante que esse mercado esteja aberto ou que o tipo de opção seja verificável na captura.
 
 Analise minuciosamente a imagem fornecida do gráfico:
-1. Identifique o ativo exibido, se é OTC, se o período visível corresponde a M1 ou M5.
+1. Identifique o ativo exibido, se corresponde ao mercado OTC ou normal selecionado, e se o período visível corresponde a M1 ou M5. Se a identidade do mercado for ilegível, não invente.
 2. Identifique a tendência aparente, posição das velas recentes, EMA 21 (se visível), suportes e resistências, rejeições, rompimentos e zonas de indecisão.
 3. Aplique o rigor do Signal Guard: bloqueie sinais (retornando AGUARDAR) se a imagem estiver borrada, incompleta, ativo divergente, período indefinido, sinais contraditórios ou contexto insuficiente.
 4. NUNCA invente indicadores não visíveis nem preveja com certeza absoluta o próximo candle. Seja estritamente educativo e analítico.
@@ -114,7 +115,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
 9. Retorne estritamente um JSON com a estrutura solicitada.
 `;
 
-      const prompt = `Analise a captura OTC. Ativo: ${selectedAsset}. Tipo: ${marketMode}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
+      const prompt = `Analise a captura de gráfico ${chartMarket === "OTC" ? "OTC" : "de mercado normal (não OTC)"}. Ativo: ${selectedAsset}. Tipo: ${marketMode}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
 
       const admission = usageGate.acquire();
       if (!admission.allowed) {
