@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
+import SafirionConnection from "./SafirionConnection";
 import { SignalRecord, SignalStatus, signalKey, upsertSignal, summarizeSignals, summarizeComparisons, isConfirmed, historyGroup, wasTaken, canRecordOutcome } from "../signalHistory.js";
 import {
   Activity,
@@ -945,6 +946,7 @@ export default function App() {
             <p className="mt-1 text-[11px] text-slate-400">{historyStats.rated} operações marcadas manualmente</p>
           </div>
         </section>
+        {activeTab === "monitor" && <SafirionConnection />}
         {activeTab === "monitor" && (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 lg:gap-6">
             {/* Left Column: Configuration & Live Controls */}
