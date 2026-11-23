@@ -948,17 +948,24 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                    <label className="text-xs text-slate-400 block mb-1">Mercado do gráfico</label>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      {([{value:"OTC",label:"OTC"},{value:"REGULAR",label:"Mercado normal"}] as const).map(market => (
+                        <button key={market.value} type="button" disabled={isMonitoring}
+                          onClick={() => { setMarketType(market.value); setCustomAsset(""); setSelectedAsset(market.value === "OTC" ? OTC_ASSETS[0] : REGULAR_ASSETS[0]); }}
+                          className={`rounded-xl border px-3 py-3 text-sm font-semibold disabled:opacity-50 ${marketType === market.value
+                            ? "border-orange-400 bg-orange-800/30 text-white" : "border-slate-700 bg-[#181d2a] text-slate-400"}`}>{market.label}</button>
+                      ))}
+                    </div>
                     <label className="text-xs text-slate-400 block mb-1">Ativo do gráfico (mesmo da corretora)</label>
                     <select
                       value={selectedAsset}
+                      disabled={isMonitoring}
                       onChange={(e) => setSelectedAsset(e.target.value)}
                       className="w-full bg-[#181d2a] border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
                     >
-                      <optgroup label="Pares OTC">
-                        {OTC_ASSETS.map(asset => <option key={asset} value={asset}>{asset}</option>)}
-                      </optgroup>
-                      <optgroup label="Pares convencionais">
-                        {REGULAR_ASSETS.map(asset => <option key={asset} value={asset}>{asset}</option>)}
+                      <optgroup label={marketType === "OTC" ? "Pares OTC" : "Pares do mercado normal"}>
+                        {(marketType === "OTC" ? OTC_ASSETS : REGULAR_ASSETS).map(asset => <option key={asset} value={asset}>{asset}</option>)}
                       </optgroup>
                     </select>
                   </div>
@@ -969,14 +976,17 @@ export default function App() {
                       type="text"
                       placeholder="Outro ativo, exatamente como aparece na Safirion"
                       value={customAsset}
+                      disabled={isMonitoring}
                       onChange={(e) => setCustomAsset(e.target.value)}
                       className="w-full bg-[#181d2a] border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
                     />
                   </div>
 
                   <p className="text-[11px] leading-relaxed text-amber-200/90">
-                    A lista é para seleção manual, não confirma disponibilidade na Safirion. Abra o MESMO ativo e
-                    tipo de opção na corretora antes de iniciar o monitoramento. O app não realiza ordens.
+                    {marketType === "REGULAR"
+                      ? "Mercado normal selecionado para teste na demo. Confira se o ativo está aberto e corresponde ao gráfico da corretora."
+                      : "Mercado OTC selecionado. As cotações podem seguir regras específicas da plataforma."}
+                    {" "}A lista é manual e não garante disponibilidade na Safirion. O app não realiza ordens.
                   </p>
 
                   <div className="grid grid-cols-2 gap-3">
