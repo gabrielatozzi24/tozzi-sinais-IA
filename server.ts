@@ -1,7 +1,6 @@
 import express from "express";
 import { timingSafeEqual } from "node:crypto";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import { timingBot, trendBot } from "./bots.js";
@@ -17,22 +16,41 @@ dotenv.config();
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 
-// Initialize Gemini client server-side
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "",
-  httpOptions: {
-    headers: {
-      "User-Agent": "aistudio-build",
-    },
-  },
-});
+// Keep credentials and multimodal inference strictly on the backend.
+const primaryGroqModel = () => process.env.GROQ_PRIMARY_MODEL || "qwen/qwen3.8-27b";
+const fallbackGroqModel = () => process.env.GROQ_FALLBACK_MODEL || primaryGroqModel();
+type GroqRequest = { systemPrompt?: string; prompt: string; imageBase64?: string };
+async function groqGenerate(model: string, input: GroqRequest): Promise<{ text: string }> {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw Object.assign(new Error("GROQ_API_KEY not configured"), { status: 401 });
+  const content: Array<Record<string, unknown>> = [{ type: "text", text: input.prompt }];
+  if (input.imageBase64) content.push({ type: "image_url", image_url: { url: input.imageBase64 } });
+  const messages = [
+    ...(input.systemPrompt ? [{ role: "system", content: input.systemPrompt }] : []),
+    { role: "user", content }
+  ];
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model, messages, temperature: 0, response_format: { type: "json_object" }, max_completion_tokens: 1800 }),
+    signal: AbortSignal.timeout(25000)
+  });
+  if (!response.ok) {
+    // Do not include provider error bodies: they can contain sensitive request details.
+    throw Object.assign(new Error(`Groq request failed with HTTP ${response.status}`), { status: response.status });
+  }
+  const data: any = await response.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (typeof text !== "string" || !text.trim()) throw new Error("Groq returned empty content");
+  return { text };
+}
 
 const PORT = Number(process.env.PORT) || 3000;
 
 // Server-wide limit includes all connected browsers and model requests.
 const usageGate = new ApiUsageGate(8);
-let geminiOverloadStreak = 0;
-let geminiQuotaStreak = 0;
+let groqOverloadStreak = 0;
+let groqQuotaStreak = 0;
 // Keep an overloaded primary on a cooldown rather than retrying it each candle.
 let primaryOverloadedUntil = 0;
 
@@ -80,13 +98,13 @@ async function startServer() {
       return res.status(429).json({ error: "Aguarde 2 minutos antes de repetir o diagnóstico.", retryAfterSeconds: Math.ceil((120_000-(now-lastAiCheckAt))/1000) });
     }
     lastAiCheckAt = now;
-    const main = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
-    const configuredByRender = { primary: Boolean(process.env.GEMINI_MODEL), backup: Boolean(process.env.GEMINI_FALLBACK_MODEL) };
+    const main = primaryGroqModel();
+    const backup = fallbackGroqModel();
+    const configuredByRender = { primary: Boolean(process.env.GROQ_PRIMARY_MODEL), backup: Boolean(process.env.GROQ_FALLBACK_MODEL) };
     const models = [...new Set([main,backup])];
     const results: { model:string; ok:boolean; status:number|null; kind:string; elapsedMs:number }[] = [];
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(503).json({ configuredByRender, models, keyConfigured:false, results, error:"GEMINI_API_KEY ausente no servidor." });
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(503).json({ configuredByRender, models, keyConfigured:false, results, error:"GROQ_API_KEY ausente no servidor." });
     }
     const admission = usageGate.acquire();
     if (!admission.allowed) return res.status(429).json({
@@ -99,7 +117,7 @@ async function startServer() {
         if (results.length && usageGate.consumeFallback().allowed === false) break;
         const started=Date.now();
         try {
-          await ai.models.generateContent({ model, contents:"Responda somente OK.", config:{maxOutputTokens:12} });
+          await groqGenerate(model, { prompt: "Retorne um objeto JSON com a chave ok e valor true." });
           results.push({model,ok:true,status:200,kind:"OK",elapsedMs:Date.now()-started});
         } catch(err:any) {
           const parsed=Number(err?.status||err?.code);
@@ -135,7 +153,7 @@ async function startServer() {
         return res.status(400).json({ error: "Período ou expiração inválidos." });
       }
 
-      if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: "Configure GEMINI_API_KEY no Render." });
+      if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: "Configure GROQ_API_KEY no Render." });
       if (typeof imageBase64 !== "string" || !imageBase64.startsWith("data:image/")) {
         return res.status(400).json({ error: "Imagem de captura inválida." });
       }
@@ -174,74 +192,10 @@ Analise minuciosamente a imagem fornecida do gráfico:
           usage: usageGate.stats()
         });
       }
-      // Use stable multimodal structured-output default; Render overrides remain authoritative.
-      const primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
-      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
-      const generationRequest = {
-        contents: [
-          {
-            inlineData: {
-              mimeType: imageBase64.startsWith("data:image/jpeg") ? "image/jpeg" : "image/png",
-              data: cleanBase64,
-            },
-          },
-          { text: prompt },
-        ],
-        config: {
-          systemInstruction: systemPrompt,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              visionResult: {
-                type: Type.OBJECT,
-                properties: {
-                  assetDetected: { type: Type.STRING },
-                  isOtc: { type: Type.BOOLEAN },
-                  timeframeDetected: { type: Type.STRING },
-                  trend: { type: Type.STRING },
-                  ema21Status: { type: Type.STRING },
-                  supportResistance: { type: Type.STRING },
-                  candlesSummary: { type: Type.STRING },
-                  decision: { type: Type.STRING, description: "POSSÍVEL COMPRA, POSSÍVEL VENDA ou AGUARDAR" },
-                  currentCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
-                  lastClosedCandleDirection: { type: Type.STRING, description: "ALTA, BAIXA ou INDEFINIDA" },
-                  trendSupportsDirection: { type: Type.BOOLEAN, description: "Estrutura de tendência confirmada sustenta a direção proposta" },
-                  minorCountertrendPullback: { type: Type.BOOLEAN, description: "Vela atual contrária é apenas correção pequena e fraca, com evidência visual" },
-                  candleBodyStrength: { type: Type.STRING, enum: ["FORTE","MODERADO","FRACO","INDEFINIDO"], description: "Força do corpo da vela atual visível; INDEFINIDO se não há evidência" },
-                  opposingWickPressure: { type: Type.STRING, enum: ["FORTE","MODERADA","FRACA","INDEFINIDA"], description: "Pressão de pavios CONTRÁRIOS à direção proposta; INDEFINIDA se não verificável" },
-                  reversalEvidence: { type: Type.STRING, enum: ["FORTE","MODERADA","AUSENTE","INDEFINIDA"], description: "Evidência visual de reversão, não certeza preditiva" },
-                  structureContinuation: { type: Type.STRING, enum: ["SIM","NAO","INDEFINIDA"], description: "Estrutura favorece continuação da direção proposta segundo a captura" },
-                  reason: { type: Type.STRING }
-                },
-                required: ["assetDetected", "isOtc", "timeframeDetected", "trend", "decision", "reason", "currentCandleDirection", "lastClosedCandleDirection", "trendSupportsDirection", "minorCountertrendPullback"]
-              },
-              guardResult: {
-                type: Type.OBJECT,
-                properties: {
-                  passed: { type: Type.BOOLEAN },
-                  checks: {
-                    type: Type.OBJECT,
-                    properties: {
-                      blurry: { type: Type.BOOLEAN },
-                      incomplete: { type: Type.BOOLEAN },
-                      assetMatch: { type: Type.BOOLEAN },
-                      timeframeMatch: { type: Type.BOOLEAN },
-                      contradictory: { type: Type.BOOLEAN },
-                      contextOk: { type: Type.BOOLEAN }
-                    },
-                    required: ["blurry", "incomplete", "assetMatch", "timeframeMatch", "contradictory", "contextOk"]
-                  },
-                  finalDecision: { type: Type.STRING, description: "POSSÍVEL COMPRA, POSSÍVEL VENDA ou AGUARDAR" },
-                  guardReason: { type: Type.STRING }
-                },
-                required: ["passed", "checks", "finalDecision", "guardReason"]
-              }
-            },
-            required: ["visionResult", "guardResult"]
-          }
-        }
-      };
+      // Groq multimodal request; existing guard validations below remain unchanged.
+      const primaryModel = primaryGroqModel();
+      const backupModel = fallbackGroqModel();
+      const generationRequest = { systemPrompt, prompt, imageBase64 };
       let response;
       let activeModel = primaryModel;
       // Only send attempts once per model, never loop or retry a possibly processed request.
@@ -249,14 +203,14 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const generate = async (model:string) => {
         const started = Date.now();
         try {
-          const result = await ai.models.generateContent({ model, ...generationRequest });
+          const result = await groqGenerate(model, generationRequest);
           modelAttempts.push({model,status:200,kind:"OK",elapsedMs:Date.now()-started});
           return result;
         } catch(error:any) {
           const status = Number(error?.status || error?.code);
           const safeStatus = Number.isFinite(status) && status >= 400 && status <= 599 ? status : null;
           modelAttempts.push({model,status:safeStatus,kind:classifyGeminiError(error),elapsedMs:Date.now()-started});
-          console.warn("Gemini multimodal request failed", {model,status:safeStatus,kind:classifyGeminiError(error),elapsedMs:Date.now()-started});
+          console.warn("Groq multimodal request failed", {model,status:safeStatus,kind:classifyGeminiError(error),elapsedMs:Date.now()-started});
           throw error;
         }
       };
@@ -288,8 +242,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
       } finally {
         usageGate.release();
       }
-      geminiOverloadStreak = 0;
-      geminiQuotaStreak = 0;
+      groqOverloadStreak = 0;
+      groqQuotaStreak = 0;
       console.log("Chart analysis succeeded with model:", activeModel);
 
       const jsonText = response.text || "{}";
@@ -447,29 +401,29 @@ Analise minuciosamente a imagem fornecida do gráfico:
       usageGate.release();
       const kind = classifyGeminiError(error);
       if (kind === "QUOTA" || kind === "OVERLOAD") {
-        if (kind === "OVERLOAD") geminiOverloadStreak += 1;
-        if (kind === "QUOTA") geminiQuotaStreak += 1;
+        if (kind === "OVERLOAD") groqOverloadStreak += 1;
+        if (kind === "QUOTA") groqQuotaStreak += 1;
         const retryAfterSeconds = kind === "QUOTA"
-          ? Math.min(900, 120 * (2 ** Math.min(4, geminiQuotaStreak - 1)))
-          : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
+          ? Math.min(900, 120 * (2 ** Math.min(4, groqQuotaStreak - 1)))
+          : Math.min(300, 60 * (2 ** Math.min(3, groqOverloadStreak - 1)));
         usageGate.pause(retryAfterSeconds);
-        console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
-          process.env.GEMINI_MODEL || "gemini-2.5-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite");
+        console.warn("Groq API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
+          primaryGroqModel(), fallbackGroqModel());
         return res.status(kind === "QUOTA" ? 429 : 503)
           .set("Retry-After", String(retryAfterSeconds)).json({
             error: kind === "QUOTA"
-              ? "Limite de consultas do Gemini atingido (429). Aguardando liberação da cota."
-              : "Gemini temporariamente sobrecarregado (503). Pausa automática ativada.",
-            type: kind === "QUOTA" ? "GEMINI_QUOTA" : "GEMINI_UNAVAILABLE",
+              ? "Limite de consultas da Groq atingido (429). Aguardando liberação da cota."
+              : "Groq temporariamente sobrecarregada (503). Pausa automática ativada.",
+            type: kind === "QUOTA" ? "GROQ_QUOTA" : "GROQ_UNAVAILABLE",
             attempts: Array.isArray(error?.tozziAttempts) ? error.tozziAttempts : [],
             retryAfterSeconds
           });
       }
       console.error("Error analyzing chart:", error);
       res.status(kind === "AUTH" ? 503 : 500).json({
-        error: kind === "AUTH" ? "Acesso à API Gemini não autorizado. Verifique a configuração da chave."
+        error: kind === "AUTH" ? "Acesso à API Groq não autorizado. Verifique a configuração da chave."
           : "Falha técnica ao processar análise; nenhum sinal foi validado.",
-        type: kind === "AUTH" ? "GEMINI_AUTH" : "ANALYSIS_ERROR",
+        type: kind === "AUTH" ? "GROQ_AUTH" : "ANALYSIS_ERROR",
         attempts: Array.isArray(error?.tozziAttempts) ? error.tozziAttempts : []
       });
     }
