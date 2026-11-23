@@ -59,6 +59,7 @@ export default function App() {
 
   // Configuration
   const [selectedAsset, setSelectedAsset] = useState("EUR/USD OTC");
+  const [marketType, setMarketType] = useState<"OTC" | "REGULAR">("OTC");
   const [optionMode, setOptionMode] = useState<"BINARIA" | "DIGITAL">("BINARIA");
   const [customAsset, setCustomAsset] = useState("");
   const [selectedTimeframe, setSelectedTimeframe] = useState<"M1" | "M5">("M1");
@@ -164,10 +165,13 @@ export default function App() {
   const candidateRef = useRef<Candidate | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [dismissedPopupKey, setDismissedPopupKey] = useState("");
+  const [miniCountdown, setMiniCountdown] = useState<{targetEpoch:number;asset:string;decision:string;timeframe:string}|null>(null);
   const [browserNotifications, setBrowserNotifications] = useState<NotificationPermission | "unsupported">(
     typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported"
   );
-  const popupKey = candidate ? `${candidate.targetEpoch}-${candidate.status}` : "";
+  // One alert identity throughout PRE_ALERT -> CONFIRMED -> CLOSED.
+  // Marking or dismissing a signal must never reopen the same notification.
+  const popupKey = candidate ? `${candidate.targetEpoch}-${candidate.asset}-${candidate.decision}` : "";
   const popupVisible = Boolean(candidate) && popupKey !== dismissedPopupKey;
   const enableBrowserNotifications = async () => {
     if (!("Notification" in window)) { setBrowserNotifications("unsupported"); return; }
@@ -212,6 +216,7 @@ export default function App() {
     const ticker = setInterval(() => {
       const now = Date.now();
       setNowEpoch(now);
+      setMiniCountdown(previous => previous && now > previous.targetEpoch + 4000 ? null : previous);
       const pending = candidateRef.current;
       if (pending && (pending.status === "PRE_ALERT" || pending.status === "CONFIRMED") && now > pending.targetEpoch + 3000) {
         setCandidateSafe({
@@ -391,6 +396,7 @@ export default function App() {
   const stopMonitoring = () => {
     sessionRef.current++;
     setCandidateSafe(null);
+    setMiniCountdown(null);
     setCurrentVisionResult(null);
     setCurrentGuardResult(null);
     setExtraBots(null);
@@ -414,7 +420,7 @@ export default function App() {
 
   const togglePause = () => {
     pauseRef.current = !isPaused;
-    if (!isPaused) setCandidateSafe(null);
+    if (!isPaused) { setCandidateSafe(null); setMiniCountdown(null); }
     if (!isPaused) {
       sessionRef.current++;
       activeRequestRef.current?.abort();
@@ -638,6 +644,15 @@ export default function App() {
     ));
   };
   const currentSignal = candidate ? signalsHistory.find(item => Number(item.targetEpoch) === candidate.targetEpoch && item.asset === candidate.asset && isConfirmed(item)) : undefined;
+  const pickConfirmedSignal = (signal: Candidate) => {
+    if (signal.status !== "CONFIRMED" || signal.targetEpoch <= Date.now()) {
+      setDismissedPopupKey(popupKey);
+      return;
+    }
+    markSignalAction(signal.targetEpoch, signal.asset, "TAKEN");
+    setDismissedPopupKey(popupKey);
+    setMiniCountdown({targetEpoch:signal.targetEpoch,asset:signal.asset,decision:signal.decision,timeframe:signal.timeframe});
+  };
   const visibleHistory = signalsHistory.filter(item => historyView === "ALL" || historyGroup(item) === historyView);
   const historyStats = summarizeSignals(signalsHistory);
   const winRate = historyStats.winRate;
@@ -1529,12 +1544,14 @@ export default function App() {
           <p className="my-3 text-xs text-slate-300">{candidate.reason}</p>
           {(candidate.status === "CONFIRMED" || candidate.status === "CLOSED") && (
             <div className="grid grid-cols-2 gap-2 mb-3">
-              <button type="button" onClick={() => { markSignalAction(candidate.targetEpoch, candidate.asset, "TAKEN"); setDismissedPopupKey(popupKey); }}
+              <button type="button" disabled={candidate.status !== "CONFIRMED" || candidate.targetEpoch <= nowEpoch}
+                onClick={() => pickConfirmedSignal(candidate)}
                 className={`rounded-xl px-3 py-3 text-xs font-extrabold ${currentSignal && wasTaken(currentSignal) ? "bg-purple-600 text-white ring-2 ring-purple-300" : "bg-green-700 text-white hover:bg-green-600"}`}>✓ PEGAR SINAL</button>
-              <button type="button" onClick={() => { markSignalAction(candidate.targetEpoch, candidate.asset, "IGNORED"); setDismissedPopupKey(popupKey); }}
+              <button type="button" onClick={() => { markSignalAction(candidate.targetEpoch, candidate.asset, "IGNORED"); setMiniCountdown(null); setDismissedPopupKey(popupKey); }}
                 className={`rounded-xl px-3 py-3 text-xs font-extrabold ${currentSignal?.tradeAction === "IGNORED" ? "bg-amber-500 text-black" : "bg-slate-700 text-white hover:bg-slate-600"}`}>✕ IGNORAR</button>
             </div>
           )}
+          {candidate.status === "CLOSED" && <p className="mb-3 text-xs font-bold text-amber-300">Horário já encerrado: não é possível pegar este sinal agora.</p>}
           {candidate.status === "PRE_ALERT" && <p className="mb-3 text-xs font-bold text-amber-300">Aguarde a reconfirmação. Ainda não é permitido pegar este sinal.</p>}
           {["UNVERIFIED","CANCELLED","EXPIRED"].includes(candidate.status) && <p className="mb-3 text-xs font-bold text-amber-300">Sem confirmação: não pode ser marcado como operação.</p>}
           <button type="button" onClick={() => { setActiveTab("alerts"); setDismissedPopupKey(popupKey); }}
@@ -1542,6 +1559,25 @@ export default function App() {
             Visualizar sinal
           </button>
           <p className="mt-2 text-[10px] text-slate-500">Aviso educativo; não executa ordens e não garante acerto.</p>
+        </div>
+      )}
+
+      {/* Small countdown is informational, not a broker-synchronised entry trigger. */}
+      {miniCountdown && (
+        <div role="status" aria-live="off"
+          className="fixed top-20 right-3 z-[105] w-[215px] rounded-2xl border border-purple-400/50 bg-[#111626]/95 p-3 shadow-2xl shadow-purple-950/70 backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-bold text-purple-200">SINAL MARCADO · DEMO</span>
+            <button type="button" onClick={() => setMiniCountdown(null)} aria-label="Fechar cronômetro"
+              className="rounded p-1 text-slate-400 hover:text-white"><XCircle className="h-4 w-4"/></button>
+          </div>
+          <p className="mt-1 text-xs text-white font-semibold">{miniCountdown.asset} · {miniCountdown.timeframe}</p>
+          <p className="text-[11px] text-slate-300">{miniCountdown.decision}</p>
+          <p className={`mt-1 text-center font-mono text-4xl font-black tabular-nums ${nowEpoch >= miniCountdown.targetEpoch ? "text-amber-300" : "text-green-300"}`}>
+            {nowEpoch >= miniCountdown.targetEpoch ? "00" : String(Math.ceil((miniCountdown.targetEpoch - nowEpoch)/1000)).padStart(2,"0")}
+          </p>
+          <p className="text-center text-[11px] text-slate-300">{nowEpoch >= miniCountdown.targetEpoch ? "HORÁRIO ALCANÇADO · NÃO ENTRE ATRASADA" : "Segundos até o horário previsto"}</p>
+          <p className="mt-1 text-center text-[10px] text-amber-200">Relógio do dispositivo; confira a vela e a hora da corretora.</p>
         </div>
       )}
 
