@@ -80,8 +80,8 @@ async function startServer() {
       return res.status(429).json({ error: "Aguarde 2 minutos antes de repetir o diagnóstico.", retryAfterSeconds: Math.ceil((120_000-(now-lastAiCheckAt))/1000) });
     }
     lastAiCheckAt = now;
-    const main = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash";
+    const main = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+    const backup = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
     const configuredByRender = { primary: Boolean(process.env.GEMINI_MODEL), backup: Boolean(process.env.GEMINI_FALLBACK_MODEL) };
     const models = [...new Set([main,backup])];
     const results: { model:string; ok:boolean; status:number|null; kind:string; elapsedMs:number }[] = [];
@@ -174,9 +174,9 @@ Analise minuciosamente a imagem fornecida do gráfico:
           usage: usageGate.stats()
         });
       }
-      // Prioritize the model verified responsive in user diagnostics (text-only test); Render overrides still take priority.
-      const primaryModel = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash";
+      // Use stable multimodal structured-output default; Render overrides remain authoritative.
+      const primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+      const backupModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite";
       const generationRequest = {
         contents: [
           {
@@ -244,29 +244,47 @@ Analise minuciosamente a imagem fornecida do gráfico:
       };
       let response;
       let activeModel = primaryModel;
+      // Only send attempts once per model, never loop or retry a possibly processed request.
+      const modelAttempts: {model:string;status:number|null;kind:string;elapsedMs:number}[] = [];
+      const generate = async (model:string) => {
+        const started = Date.now();
+        try {
+          const result = await ai.models.generateContent({ model, ...generationRequest });
+          modelAttempts.push({model,status:200,kind:"OK",elapsedMs:Date.now()-started});
+          return result;
+        } catch(error:any) {
+          const status = Number(error?.status || error?.code);
+          const safeStatus = Number.isFinite(status) && status >= 400 && status <= 599 ? status : null;
+          modelAttempts.push({model,status:safeStatus,kind:classifyGeminiError(error),elapsedMs:Date.now()-started});
+          console.warn("Gemini multimodal request failed", {model,status:safeStatus,kind:classifyGeminiError(error),elapsedMs:Date.now()-started});
+          throw error;
+        }
+      };
       try {
         const cooldownActive = Date.now() < primaryOverloadedUntil &&
           backupModel && backupModel !== primaryModel;
-        // After a genuine 503, briefly prefer the backup instead of repeatedly
-        // hitting a known-overloaded model and wasting two calls per candle.
         activeModel = cooldownActive ? backupModel : primaryModel;
         try {
-          response = await ai.models.generateContent({ model: activeModel, ...generationRequest });
+          response = await generate(activeModel);
           if (activeModel === primaryModel) primaryOverloadedUntil = 0;
         } catch (primaryError: any) {
           const kind = classifyGeminiError(primaryError);
           if (kind === "OVERLOAD" && activeModel === primaryModel)
             primaryOverloadedUntil = Date.now() + 15 * 60_000;
-          // Never fail over on 429 quotas, auth failures, or while already using backup.
           if (kind !== "OVERLOAD" || activeModel !== primaryModel ||
               !backupModel || backupModel === primaryModel) throw primaryError;
           const fallbackPermission = usageGate.consumeFallback();
           if (!fallbackPermission.allowed) {
-            throw { status: 429, message: "Limite local: fallback não iniciado para preservar cota." };
+            // Preserve the original 503 instead of disguising it as quota 429.
+            throw primaryError;
           }
           activeModel = backupModel;
-          response = await ai.models.generateContent({ model: backupModel, ...generationRequest });
+          response = await generate(backupModel);
         }
+      } catch(error:any) {
+        // Send only sanitized model diagnostics. Never return provider error body or key.
+        error.tozziAttempts = modelAttempts;
+        throw error;
       } finally {
         usageGate.release();
       }
@@ -415,6 +433,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         guard: { name: "Tozzi Signal Guard", passed: approved, decision: approved ? direction : "AGUARDAR" }
       };
       analysisData.apiUsage = usageGate.stats();
+      analysisData.providerModel = activeModel;
       analysisData.identity = { asset: assetCheck, timeframe: timeframeCheck };
       analysisData.optionMode = marketMode;
       analysisData.phase = stage;
@@ -435,13 +454,14 @@ Analise minuciosamente a imagem fornecida do gráfico:
           : Math.min(300, 60 * (2 ** Math.min(3, geminiOverloadStreak - 1)));
         usageGate.pause(retryAfterSeconds);
         console.warn("Gemini API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
-          process.env.GEMINI_MODEL || "gemini-3.5-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash");
+          process.env.GEMINI_MODEL || "gemini-2.5-flash-lite", process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite");
         return res.status(kind === "QUOTA" ? 429 : 503)
           .set("Retry-After", String(retryAfterSeconds)).json({
             error: kind === "QUOTA"
               ? "Limite de consultas do Gemini atingido (429). Aguardando liberação da cota."
               : "Gemini temporariamente sobrecarregado (503). Pausa automática ativada.",
             type: kind === "QUOTA" ? "GEMINI_QUOTA" : "GEMINI_UNAVAILABLE",
+            attempts: Array.isArray(error?.tozziAttempts) ? error.tozziAttempts : [],
             retryAfterSeconds
           });
       }
@@ -449,7 +469,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
       res.status(kind === "AUTH" ? 503 : 500).json({
         error: kind === "AUTH" ? "Acesso à API Gemini não autorizado. Verifique a configuração da chave."
           : "Falha técnica ao processar análise; nenhum sinal foi validado.",
-        type: kind === "AUTH" ? "GEMINI_AUTH" : "ANALYSIS_ERROR"
+        type: kind === "AUTH" ? "GEMINI_AUTH" : "ANALYSIS_ERROR",
+        attempts: Array.isArray(error?.tozziAttempts) ? error.tozziAttempts : []
       });
     }
   });
