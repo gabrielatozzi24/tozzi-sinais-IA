@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { WebSocketServer, WebSocket } from "ws";
 import { timingBot, trendBot } from "./bots.js";
 import { confirmationQuality } from "./confirmationQuality.js";
+import { finalCandleRiskGate } from "./finalCandleRiskGate.js";
 import { precisionCandleBot, reversalWatchBot } from "./advisoryCandleBots.js";
 import { candleBot } from "./candleBot.js";
 import { checkAsset, checkTimeframe } from "./marketIdentity.js";
@@ -74,7 +75,7 @@ async function startServer() {
     try {
       const { imageBase64, selectedAsset, selectedTimeframe, selectedExpiration, phase, targetEpoch, priorDirection, captureTimestamp, optionMode } = req.body;
       const marketMode = optionMode === "DIGITAL" ? "DIGITAL" : "BINARIA";
-      const chartMarket = /\\bOTC\\b/i.test(String(selectedAsset || "")) ? "OTC" : "REGULAR";
+      const chartMarket = /\bOTC\b/i.test(String(selectedAsset || "")) ? "OTC" : "REGULAR";
       const stage = phase === "CONFIRM" ? "CONFIRM" : "PREPARE";
       const target = Number(targetEpoch);
       const remainingBefore = target - Date.now();
@@ -272,6 +273,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
       });
       const trend = trendBot(vision, direction);
       const finalCandleQuality = confirmationQuality(stage, direction, vision);
+      const finalCandleRisk = finalCandleRiskGate(stage,vision);
       // Advisory-only: no extra request, no modification to approval logic.
       const advisoryDirection = direction === "POSSÍVEL COMPRA" || direction === "POSSÍVEL VENDA" ? direction : vision.decision;
       const precisionCandle = precisionCandleBot(vision, advisoryDirection);
@@ -288,13 +290,14 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const approved = guard.passed === true && ch.blurry === false && ch.incomplete === false &&
         assetAligned && timeframeAligned && ch.contradictory === false && ch.contextOk === true &&
         candleAligned && previousAligned && visionAgrees && timeframeAligned && assetAligned && withinWindow &&
-        trend.passed && candles.passed && finalCandleQuality.passed &&
+        trend.passed && candles.passed && finalCandleQuality.passed && finalCandleRisk.passed &&
         timing.passed && Date.now() - requestStartedAt <= 15000;
       if (!approved) {
         analysisData.guardResult = {
           ...guard, passed: false, finalDecision: "AGUARDAR",
           guardReason: !timing.passed ? "Timing Bot: " + timing.reason
             : guardDeclined ? "Signal Guard: " + (guard.guardReason || vision.reason || "Análise visual sem direção segura; aguardando nova captura.")
+            : !finalCandleRisk.passed ? "Proteção da vela final: " + finalCandleRisk.reason
             : !finalCandleQuality.passed ? "Reconfirmação de velas: " + finalCandleQuality.reason
             : !candles.passed ? "Candle Bot: " + candles.reason
             : !trend.passed ? "Trend Bot: " + trend.reason
@@ -338,6 +341,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
             trend: { ...trend, name: "Tozzi Trend Bot" },
             candles,
             finalCandleQuality,
+            finalCandleRisk,
             precisionCandle,
             reversalWatch
           },
@@ -350,6 +354,7 @@ Analise minuciosamente a imagem fornecida do gráfico:
         trend: { ...trend, name: "Tozzi Trend Bot" },
         candles,
         finalCandleQuality,
+        finalCandleRisk,
         precisionCandle,
         reversalWatch,
         vision: { name: "Tozzi Vision Bot", decision: vision.decision },
