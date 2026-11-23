@@ -32,12 +32,16 @@ async function groqGenerate(model: string, input: GroqRequest): Promise<{ text: 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages, temperature: 0, response_format: { type: "json_object" }, max_completion_tokens: 1800 }),
+    body: JSON.stringify({ model, messages, temperature: 0, response_format: { type: "json_object" }, max_completion_tokens: 900 }),
     signal: AbortSignal.timeout(25000)
   });
   if (!response.ok) {
     // Do not include provider error bodies: they can contain sensitive request details.
-    throw Object.assign(new Error(`Groq request failed with HTTP ${response.status}`), { status: response.status });
+    const retry = Number(response.headers.get("retry-after"));
+    throw Object.assign(new Error(`Groq request failed with HTTP ${response.status}`), {
+      status: response.status,
+      retryAfterSeconds: Number.isFinite(retry) && retry > 0 ? Math.ceil(retry) : undefined
+    });
   }
   const data: any = await response.json();
   const text = data?.choices?.[0]?.message?.content;
@@ -49,6 +53,28 @@ const PORT = Number(process.env.PORT) || 3000;
 
 // Server-wide limit includes all connected browsers and model requests.
 const usageGate = new ApiUsageGate(8);
+// Conservative global server-side allowance for the vision model's free tier.
+// Each image requires ~2048 input tokens plus a variable prompt and completion.
+const FREE_GROQ_MAX_REQUESTS_PER_MINUTE = 2;
+const FREE_GROQ_MAX_DAILY_REQUESTS = 40;
+const groqMinuteRequests: number[] = [];
+let groqDailyCount = 0;
+let groqDailyDate = "";
+function groqBudget(now = Date.now()) {
+  const today = new Date(now).toISOString().slice(0,10);
+  if (groqDailyDate !== today) { groqDailyDate = today; groqDailyCount = 0; }
+  while (groqMinuteRequests.length && now - groqMinuteRequests[0] >= 60_000) groqMinuteRequests.shift();
+  if (groqDailyCount >= FREE_GROQ_MAX_DAILY_REQUESTS) {
+    return { allowed:false, retryAfterSeconds:Math.max(1,Math.ceil((Date.parse(today+"T00:00:00Z")+86400000-now)/1000)), reason:"daily" };
+  }
+  if (groqMinuteRequests.length >= FREE_GROQ_MAX_REQUESTS_PER_MINUTE)
+    return { allowed:false, retryAfterSeconds:Math.max(1, Math.ceil((groqMinuteRequests[0]+60_000-now)/1000)), reason:"minute" };
+  return { allowed:true, retryAfterSeconds:0, reason:"ok" };
+}
+function countGroqRequest(now = Date.now()) {
+  groqDailyCount++;
+  groqMinuteRequests.push(now);
+}
 let groqOverloadStreak = 0;
 let groqQuotaStreak = 0;
 // Keep an overloaded primary on a cooldown rather than retrying it each candle.
@@ -106,6 +132,12 @@ async function startServer() {
     if (!process.env.GROQ_API_KEY) {
       return res.status(503).json({ configuredByRender, models, keyConfigured:false, results, error:"GROQ_API_KEY ausente no servidor." });
     }
+    const budget = groqBudget();
+    if (!budget.allowed) return res.status(429).set("Retry-After",String(budget.retryAfterSeconds)).json({
+      configuredByRender, models, keyConfigured:true, results,
+      error:"Economia de API: aguarde para realizar novo diagnóstico.",
+      type:"API_RATE_LIMIT", retryAfterSeconds:budget.retryAfterSeconds
+    });
     const admission = usageGate.acquire();
     if (!admission.allowed) return res.status(429).json({
       configuredByRender, models, keyConfigured:true,
@@ -114,9 +146,10 @@ async function startServer() {
     });
     try {
       for (const model of models) {
-        if (results.length && usageGate.consumeFallback().allowed === false) break;
+        if (results.length) break; // Do not spend a second free-tier call just for diagnostic.
         const started=Date.now();
         try {
+          countGroqRequest();
           await groqGenerate(model, { prompt: "Retorne um objeto JSON com a chave ok e valor true." });
           results.push({model,ok:true,status:200,kind:"OK",elapsedMs:Date.now()-started});
         } catch(err:any) {
@@ -181,6 +214,12 @@ Analise minuciosamente a imagem fornecida do gráfico:
 
       const prompt = `Analise a captura de gráfico ${chartMarket === "OTC" ? "OTC" : "de mercado normal (não OTC)"}. Ativo: ${selectedAsset}. Tipo: ${marketMode}. Período: ${selectedTimeframe}. Expiração: ${selectedExpiration}. Etapa: ${stage}. Horário previsto de entrada (UTC epoch ms): ${target}. ${stage === "CONFIRM" ? "Confirme SOMENTE se a mesma direção " + priorDirection + " continuar forte; caso contrário AGUARDAR." : "Verifique se existe uma hipótese preliminar suficientemente clara."} Retorne JSON; se ambiguidade, AGUARDAR.`;
 
+      const budget = groqBudget();
+      if (!budget.allowed) return res.status(429).set("Retry-After", String(budget.retryAfterSeconds)).json({
+        error: budget.reason === "daily" ? "Limite preventivo diário de análises gratuitas atingido." :
+          "Economia da API Groq: aguardando intervalo seguro entre análises.",
+        type:"API_RATE_LIMIT", retryAfterSeconds:budget.retryAfterSeconds, attempts:[]
+      });
       const admission = usageGate.acquire();
       if (!admission.allowed) {
         const quota = admission.reason === "LIMIT" || admission.reason === "PAUSE";
@@ -203,7 +242,8 @@ Analise minuciosamente a imagem fornecida do gráfico:
       const generate = async (model:string) => {
         const started = Date.now();
         try {
-          const result = await groqGenerate(model, generationRequest);
+          countGroqRequest();
+           const result = await groqGenerate(model, generationRequest);
           modelAttempts.push({model,status:200,kind:"OK",elapsedMs:Date.now()-started});
           return result;
         } catch(error:any) {
@@ -403,9 +443,9 @@ Analise minuciosamente a imagem fornecida do gráfico:
       if (kind === "QUOTA" || kind === "OVERLOAD") {
         if (kind === "OVERLOAD") groqOverloadStreak += 1;
         if (kind === "QUOTA") groqQuotaStreak += 1;
-        const retryAfterSeconds = kind === "QUOTA"
+        const retryAfterSeconds = Math.max(Number(error?.retryAfterSeconds) || 0, kind === "QUOTA"
           ? Math.min(900, 120 * (2 ** Math.min(4, groqQuotaStreak - 1)))
-          : Math.min(300, 60 * (2 ** Math.min(3, groqOverloadStreak - 1)));
+          : Math.min(300, 60 * (2 ** Math.min(3, groqOverloadStreak - 1))));
         usageGate.pause(retryAfterSeconds);
         console.warn("Groq API paused due to", kind, "for", retryAfterSeconds, "seconds.", "models:",
           primaryGroqModel(), fallbackGroqModel());

@@ -556,7 +556,7 @@ export default function App() {
         const details = await res.json().catch(() => ({}));
         setProviderAttempts(Array.isArray(details.attempts) ? details.attempts : []);
         if ((res.status === 429 || res.status === 503) &&
-          ["GEMINI_QUOTA", "GEMINI_UNAVAILABLE", "API_RATE_LIMIT", "ANALYSIS_BUSY"].includes(details?.type)) {
+          ["GROQ_QUOTA", "GROQ_UNAVAILABLE", "GEMINI_QUOTA", "GEMINI_UNAVAILABLE", "API_RATE_LIMIT", "ANALYSIS_BUSY"].includes(details?.type)) {
           const retrySeconds = Math.max(1, Math.min(1800, Number(details.retryAfterSeconds) || 60));
           overloadUntilRef.current = Date.now() + retrySeconds * 1000;
           setOverloadUntil(overloadUntilRef.current);
@@ -1286,21 +1286,21 @@ export default function App() {
                     </div>
                   )}
                   {overloadUntil > nowEpoch && <p className="mb-2 text-xs text-amber-200">
-                    Gemini temporariamente indisponível. As análises estão suspensas por segurança. Nova tentativa automática em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos. Não é necessário atualizar a página.
+                    Groq temporariamente indisponível. As análises estão suspensas por segurança. Nova tentativa automática em {Math.ceil((overloadUntil - nowEpoch) / 1000)} segundos. Não é necessário atualizar a página.
                   </p>}
                   {currentGuardResult?.technicalError && (
                     <div className="mb-3 rounded-xl border border-purple-500/40 bg-[#17172b] p-3 space-y-2">
                       <p className="text-xs text-slate-300">Erro recorrente? Verifique quais modelos estão configurados no Render, sem compartilhar sua chave.</p>
                       <button type="button" onClick={() => { void runAiDiagnostic(); }} disabled={aiDiagnosticBusy}
                         className="rounded-lg bg-purple-700 disabled:opacity-50 px-3 py-2 text-xs font-bold text-white">
-                        {aiDiagnosticBusy?"Verificando...":"DIAGNOSTICAR GEMINI"}
+                        {aiDiagnosticBusy?"Verificando...":"DIAGNOSTICAR GROQ"}
                       </button>
                       {aiDiagnostic && <div className="text-[11px] text-slate-200 space-y-1">
                         {aiDiagnostic.error && <p className="text-amber-300">{aiDiagnostic.error}</p>}
                         {aiDiagnostic.models && <p>Modelos usados: {aiDiagnostic.models.join(" / ")}</p>}
                         {aiDiagnostic.configuredByRender &&
                           <p>Render define o modelo principal: {aiDiagnostic.configuredByRender.primary?"SIM":"NÃO"} · reserva: {aiDiagnostic.configuredByRender.backup?"SIM":"NÃO"}</p>}
-                        {aiDiagnostic.keyConfigured===false && <p className="text-red-300">Chave Gemini não configurada no Render.</p>}
+                        {aiDiagnostic.keyConfigured===false && <p className="text-red-300">Chave Groq não configurada no Render.</p>}
                         {aiDiagnostic.results?.map((result:any,i:number)=>
                           <p key={i} className={result.ok?"text-green-300":"text-amber-300"}>
                             {result.model}: {result.ok?"OK":`Erro ${result.status??"?"} (${result.kind})`} · {result.elapsedMs}ms
